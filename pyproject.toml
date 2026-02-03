@@ -1,0 +1,36 @@
+[project]
+name = "arc-agi3"
+version = "0.1.0"
+description = "Development environment for the ARC-AGI-3 interactive reasoning benchmark"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "arc-agi>=0.9.1",
+    "pytest>=9.0.2",
+    "python-dotenv>=1.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.3.0",
+    "pre-commit>=3.6.0",
+]
+agentops = [
+    "agentops>=0.3.0",
+]
+llm = [
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
