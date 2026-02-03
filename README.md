@@ -63,13 +63,24 @@ arc-agi3/
 ├── pyproject.toml               # UV project configuration
 ├── .env.example                 # Environment template
 ├── .gitignore                   # Git ignore rules
+├── main.py                      # Simple entry point
 ├── docs/
 │   ├── ARC-AGI-3-OVERVIEW.md    # Challenge overview
 │   ├── API-GUIDE.md             # Python API documentation
-│   └── BUILDING-AGENTS.md       # Agent development guide
+│   ├── BUILDING-AGENTS.md       # Agent development guide
+│   ├── SOLUTION-PROPOSALS.md    # Solution approaches & evaluation
+│   ├── ARIA-VARIANTS.md         # ARIA implementation variants (Lite/Standard/Max)
+│   ├── ARC-DREAMER-V2.md        # ARC-Dreamer v2 architecture
+│   ├── NEUROSYMBOLIC-V2-ARCHITECTURE.md  # Neurosymbolic v2 architecture
+│   └── HYBRID-ARCHITECTURE.md   # ARIA hybrid architecture
+├── src/
+│   ├── arc_dreamer_v2/          # ARC-Dreamer v2 implementation
+│   ├── arc_neurosymbolic_v2/    # Neurosymbolic v2 implementation
+│   └── aria/                    # ARIA hybrid implementation
 ├── examples/
 │   ├── basic_agent.py           # Simple agent example
-│   └── random_agent.py          # Random action agent
+│   ├── random_agent.py          # Random action agent
+│   └── arc_dreamer_demo.py      # ARC-Dreamer v2 demo
 └── agents-reference/            # Cloned official ARC-AGI-3-Agents repo
     ├── agents/                  # Agent framework
     │   ├── agent.py             # Base Agent class

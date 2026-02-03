@@ -16,6 +16,7 @@ import os
 import random
 import sys
 import time
+
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -28,8 +29,8 @@ if not os.getenv("ARC_API_KEY"):
     print("  export ARC_API_KEY='your-api-key-here'")
     sys.exit(1)
 
-import arc_agi
-from arcengine import GameAction, GameState
+import arc_agi  # noqa: E402
+from arcengine import GameAction, GameState  # noqa: E402
 
 
 class RandomAgent:
@@ -85,10 +86,12 @@ class RandomAgent:
 
         # If action requires coordinates, set random values
         if action.is_complex():
-            action.set_data({
-                "x": random.randint(0, 63),
-                "y": random.randint(0, 63),
-            })
+            action.set_data(
+                {
+                    "x": random.randint(0, 63),
+                    "y": random.randint(0, 63),
+                }
+            )
             action.reasoning = {
                 "action": action.name,
                 "reason": "Random exploration",
@@ -102,27 +105,19 @@ class RandomAgent:
 def main():
     """Run the random agent."""
     parser = argparse.ArgumentParser(description="Random agent for ARC-AGI-3")
+    parser.add_argument("--game", "-g", default="ls20", help="Game ID to play (default: ls20)")
     parser.add_argument(
-        "--game", "-g",
-        default="ls20",
-        help="Game ID to play (default: ls20)"
-    )
-    parser.add_argument(
-        "--max-actions", "-m",
+        "--max-actions",
+        "-m",
         type=int,
         default=80,
-        help="Maximum actions before stopping (default: 80)"
+        help="Maximum actions before stopping (default: 80)",
     )
     parser.add_argument(
-        "--seed", "-s",
-        type=int,
-        default=None,
-        help="Random seed for reproducibility"
+        "--seed", "-s", type=int, default=None, help="Random seed for reproducibility"
     )
     parser.add_argument(
-        "--no-render",
-        action="store_true",
-        help="Disable terminal rendering (faster)"
+        "--no-render", action="store_true", help="Disable terminal rendering (faster)"
     )
     args = parser.parse_args()
 
@@ -144,31 +139,26 @@ def main():
     action_count = 0
     start_time = time.time()
 
-    print(f"\nStarting game loop...")
+    print("\nStarting game loop...")
     print("-" * 40)
 
     while action_count < args.max_actions:
         observation = env.observation_space
 
         # Check if done
-        if agent.is_done(
-            observation.state,
-            observation.levels_completed,
-            observation.win_levels
-        ):
+        if agent.is_done(observation.state, observation.levels_completed, observation.win_levels):
             print(f"\n🎉 Won after {action_count} actions!")
             break
 
         # Choose action
-        action = agent.choose_action(
-            observation.state,
-            observation.available_actions
-        )
+        action = agent.choose_action(observation.state, observation.available_actions)
 
         # Log the action
         if action_count % 10 == 0:  # Log every 10th action
-            print(f"Action {action_count + 1}: {action.name} "
-                  f"(levels: {observation.levels_completed}/{observation.win_levels})")
+            print(
+                f"Action {action_count + 1}: {action.name} "
+                f"(levels: {observation.levels_completed}/{observation.win_levels})"
+            )
 
         # Execute action
         env.step(action)

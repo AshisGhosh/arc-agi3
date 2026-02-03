@@ -11,6 +11,7 @@ Usage:
 
 import os
 import sys
+
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -23,8 +24,8 @@ if not os.getenv("ARC_API_KEY"):
     print("  export ARC_API_KEY='your-api-key-here'")
     sys.exit(1)
 
-import arc_agi
-from arcengine import GameAction, GameState
+import arc_agi  # noqa: E402
+from arcengine import GameAction, GameState  # noqa: E402
 
 
 def main():
