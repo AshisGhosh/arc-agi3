@@ -64,3 +64,9 @@ htmlcov/
 # Build artifacts
 *.pyc
 *.pyo
+
+# Model checkpoints
+checkpoints/
+*.pt
+*.pth
+*.ckpt
