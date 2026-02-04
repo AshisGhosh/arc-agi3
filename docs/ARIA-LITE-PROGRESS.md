@@ -10,16 +10,16 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| Components Complete | 12 | 9 | 🟢 |
+| Components Complete | 12 | 12 | 🟢 |
 | Parameter Budget | 29M | 25.9M | 🟢 |
 | VRAM Usage | <7GB | 1.34GB (est) | 🟢 |
 | Level Completion | >60% | - | ⚪ |
 | Fast/Slow Benefit | >10% | - | ⚪ |
 
-**Current Phase:** Phase 10 - Training Infrastructure
-**Current Component:** training/replay_buffer.py
+**Current Phase:** COMPLETE
+**Current Component:** All components implemented
 **Blockers:** None
-**Tests Passing:** 135/135
+**Tests Passing:** 185/185
 
 ---
 
@@ -36,9 +36,9 @@
 | 7 | arbiter.py | 🟢 Complete | 0 (heuristic) | ✅ | All 15 tests pass |
 | 8 | llm.py | 🟢 Complete | external | ✅ | All 16 tests pass |
 | 9 | agent.py | 🟢 Complete | - | ✅ | All 18 tests pass |
-| 10 | training/replay_buffer.py | ⚪ Not Started | - | ⚪ | |
-| 11 | training/synthetic_env.py | ⚪ Not Started | - | ⚪ | |
-| 12 | training/trainer.py | ⚪ Not Started | - | ⚪ | |
+| 10 | training/replay_buffer.py | 🟢 Complete | - | ✅ | All 14 tests pass |
+| 11 | training/synthetic_env.py | 🟢 Complete | - | ✅ | All 19 tests pass |
+| 12 | training/trainer.py | 🟢 Complete | - | ✅ | All 17 tests pass |
 
 **Legend:** ⚪ Not Started | 🟡 In Progress | 🟢 Complete | 🔴 Blocked | 🔵 Validating
 
@@ -173,20 +173,47 @@
 
 ---
 
-### Phase 10: Replay Buffer (training/replay_buffer.py)
+### Phase 10: Replay Buffer (training/replay_buffer.py) ✅ COMPLETE
 
-**Status:** ⚪ Not Started
+**Status:** 🟢 Complete
+**Completed:** 2026-02-03
 
-#### Plan
-Implement experience replay buffer for training.
+#### Results
+- ReplayBuffer with uniform sampling
+- PrioritizedReplayBuffer with importance sampling
+- EpisodeBuffer for trajectory storage
+- SumTree for efficient priority sampling
+- All 14 validation tests pass
 
-#### Success Criteria
-- [ ] Store (s, a, r, s', done) transitions
-- [ ] Uniform and prioritized sampling
-- [ ] Configurable capacity
+---
 
-#### Blockers
-- None
+### Phase 11: Synthetic Environment (training/synthetic_env.py) ✅ COMPLETE
+
+**Status:** 🟢 Complete
+**Completed:** 2026-02-03
+
+#### Results
+- SyntheticEnv with multiple mechanics (navigation, collection, switches, keys/doors, pushing, patterns)
+- SyntheticEnvGenerator for diverse environment creation
+- collect_episode helper for data collection
+- All 19 validation tests pass
+
+---
+
+### Phase 12: Trainer (training/trainer.py) ✅ COMPLETE
+
+**Status:** 🟢 Complete
+**Completed:** 2026-02-03
+
+#### Results
+- Multi-phase training pipeline:
+  - Phase 1: World model pretraining
+  - Phase 2: Fast policy (BC + entropy)
+  - Phase 3: Slow policy training
+  - Phase 4: Arbiter calibration
+  - Phase 5: Joint fine-tuning
+- Checkpointing and evaluation
+- All 17 validation tests pass
 
 ---
 
@@ -300,14 +327,23 @@ Implement experience replay buffer for training.
 - ✅ Phase 7: arbiter.py - Complete (15 tests)
 - ✅ Phase 8: llm.py - Complete (16 tests)
 - ✅ Phase 9: agent.py - Complete (18 tests)
-- Total: **135 tests passing**
+- ✅ Phase 10: training/replay_buffer.py - Complete (14 tests)
+- ✅ Phase 11: training/synthetic_env.py - Complete (19 tests)
+- ✅ Phase 12: training/trainer.py - Complete (17 tests)
+- Total: **185 tests passing**
 
-**🎉 ARIA-Lite agent fully functional! Ready for training infrastructure.**
+**🎉 ARIA-Lite implementation COMPLETE!**
+
+**All components implemented:**
+- Core neural components (encoder, world model, belief, fast/slow policies, arbiter)
+- LLM integration with graceful fallback
+- Full agent orchestration
+- Training infrastructure (replay buffer, synthetic env, multi-phase trainer)
 
 **Next Steps:**
-- Phase 10: training/replay_buffer.py
-- Phase 11: training/synthetic_env.py
-- Phase 12: training/trainer.py
+- Run actual training on synthetic environments
+- Evaluate on ARC-AGI-3 API
+- Tune hyperparameters based on results
 
 **Open Questions:**
 - None currently
@@ -337,4 +373,7 @@ Implement experience replay buffer for training.
 | 2026-02-03 | Phase 7 (arbiter.py) complete - 15 tests pass |
 | 2026-02-03 | Phase 8 (llm.py) complete - 16 tests pass |
 | 2026-02-03 | Phase 9 (agent.py) complete - 18 tests pass |
-| 2026-02-03 | **🎉 ARIA-Lite agent complete - 135 tests total** |
+| 2026-02-03 | Phase 10 (training/replay_buffer.py) complete - 14 tests pass |
+| 2026-02-03 | Phase 11 (training/synthetic_env.py) complete - 19 tests pass |
+| 2026-02-03 | Phase 12 (training/trainer.py) complete - 17 tests pass |
+| 2026-02-03 | **🎉 ARIA-Lite FULLY COMPLETE - 185 tests total** |
