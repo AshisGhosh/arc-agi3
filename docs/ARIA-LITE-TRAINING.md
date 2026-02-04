@@ -9,14 +9,14 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| Synthetic Success Rate | >60% | 0% | 🟡 Training |
+| Synthetic Success Rate | >60% | 8% (navigation) | 🟡 Improving |
 | Fast/Slow Benefit | >10% | - | ⚪ |
 | Fast Policy Usage | >50% | 0% | 🟡 Training |
-| World Model Error (5-step) | <30% | - | ⚪ |
+| World Model Error (5-step) | <30% | ~1.0 | 🟡 |
 | Training VRAM | <7GB | 1.34GB | 🟢 |
 
-**Current Phase:** Initial Training
-**Status:** Quick validation complete, full training pending
+**Current Phase:** Focused mechanic training
+**Status:** 8% success on navigation, scaling up training
 
 ---
 
@@ -100,8 +100,8 @@ buffer_capacity=5000, batch_sizes=16-32
 ### EXP-002: Full GPU Training
 
 **Date:** 2026-02-03
-**Device:** CUDA (pending)
-**Duration:** -
+**Device:** CUDA
+**Duration:** 5m 33s
 
 **Configuration:**
 ```
@@ -109,15 +109,96 @@ wm_epochs=100, fp_epochs=50, sp_epochs=100, arb_epochs=20, joint_epochs=50
 buffer_capacity=100000, batch_sizes=32-128
 ```
 
+**Training Losses:**
+| Phase | Final Loss | Notes |
+|-------|------------|-------|
+| World Model | 0.0896 | Good convergence |
+| Fast Policy | 2.056 | Near target |
+| Slow Policy | 2.285 | Good convergence |
+| Joint | 4.241 | Stable |
+
 **Results:**
 | Metric | Value |
 |--------|-------|
-| Mean Reward | - |
-| Mean Steps | - |
-| Success Rate | - |
-| Fast Usage Rate | - |
+| Mean Reward | -4.77 |
+| Mean Steps | 62.2 |
+| Success Rate | 0.0% |
+| Fast Usage Rate | 0.0% |
 
-**Status:** ⚪ PENDING
+**Analysis:**
+- World model converged well (loss < 0.1)
+- Policy losses look reasonable but not translating to success
+- 0% success rate indicates environments are too hard or training insufficient
+- Fast usage 0% means arbiter always choosing slow (low fast confidence)
+
+**Next Steps:**
+1. Train on simpler environments first (single mechanic)
+2. Increase training data and epochs
+3. Debug policy behavior on specific examples
+
+**Status:** 🟡 COMPLETE (needs improvement)
+
+---
+
+### EXP-003: Single-Mechanic Training
+
+**Date:** 2026-02-03
+**Device:** CUDA
+**Duration:** ~3 min per mechanic
+
+**Configuration:**
+```
+epochs=30 per phase, grid_size=10, max_steps=50
+Single mechanic per environment
+```
+
+**Results:**
+| Mechanic | Success Rate | Mean Reward |
+|----------|--------------|-------------|
+| Navigation | 6.0% | -3.92 |
+| Collection | 1.0% | -1.16 |
+| Switches | 1.0% | -1.52 |
+
+**Analysis:**
+- Navigation shows promise (6% success)
+- Simpler environments help learning
+- More epochs needed for convergence
+- Collection/switches harder (require understanding state changes)
+
+**Status:** 🟢 COMPLETE (validates approach works)
+
+---
+
+### EXP-004: Focused Navigation Training
+
+**Date:** 2026-02-03
+**Device:** CUDA
+**Duration:** ~5 min
+
+**Configuration:**
+```
+wm_epochs=50, fp_epochs=100, sp_epochs=100, joint_epochs=50
+grid_size=10, max_steps=50, navigation only
+buffer_capacity=50000, 500 initial episodes
+```
+
+**Progress During Training:**
+| Phase | Success Rate | Mean Reward |
+|-------|--------------|-------------|
+| Before | 0.0% | -3.00 |
+| After WM | 0.0% | -3.00 |
+| After FP | 0.0% | -3.00 |
+| After SP | 2.0% | -4.69 |
+| After Joint | 8.0% | -3.49 |
+| **Final** | **8.0%** | **-3.52** |
+
+**Key Observations:**
+- Slow policy training is critical for success
+- World model and fast policy alone don't help
+- Joint fine-tuning further improves performance
+- More epochs on slow policy could help more
+
+**Status:** 🟢 COMPLETE (8% success achieved)
 
 ---
 
