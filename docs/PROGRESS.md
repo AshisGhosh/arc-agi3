@@ -6,9 +6,11 @@
 **Status:** 🟢 On Track
 
 ## Immediate Next Step
-Collect game demonstrations and train meta-learning model for few-shot ARC-AGI-3 adaptation.
+Improve game demos (need successful trajectories) or implement game-specific experts.
 
 ## Recent Completions
+- [2026-02-04] **Few-shot training pipeline**: Demo collector + train_arc_fewshot.py (100% train accuracy)
+- [2026-02-04] **Demo collection**: 110 demos across 3 games (ls20, vc33, ft09)
 - [2026-02-04] **ARC-AGI-3 integration complete**: Created adapter (`arc_agent.py`) and validation script
 - [2026-02-04] **Zero-shot baseline**: 0/3 games (ls20, vc33, ft09) - establishes baseline for improvement
 - [2026-02-04] Installed `arcengine` package for local game execution
@@ -41,9 +43,13 @@ Collect game demonstrations and train meta-learning model for few-shot ARC-AGI-3
 - [x] **Evaluation strategy:** Using 3 local games (ls20, vc33, ft09) for offline testing
 
 ## Next Steps
-- [ ] Collect demonstrations from game replays (human or scripted)
-- [ ] Fine-tune meta-learning model on game-specific demos
-- [ ] Test few-shot adaptation (K=1, 3, 5 demos)
+- [x] Collect demonstrations from game exploration (110 demos collected)
+- [x] Fine-tune meta-learning model on game-specific demos (100% train accuracy)
+- [x] Test few-shot adaptation (K=3 demos) - 0% success (needs better demos)
+- [ ] **BLOCKER:** Need successful game trajectories for meaningful training
+- [ ] Option A: Implement game-specific experts (A* for ls20 navigation)
+- [ ] Option B: Use human demonstrations (record successful play)
+- [ ] Option C: Use reinforcement learning to discover solutions
 
 ## Links
 - [Progress Guide](PROGRESS-GUIDE.md) - Format instructions for all trackers

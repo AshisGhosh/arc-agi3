@@ -73,3 +73,6 @@ checkpoints/
 
 # ARC-AGI-3 game files (downloaded locally)
 environment_files/
+
+# Collected demos (regenerable)
+demos/
