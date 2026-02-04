@@ -9,11 +9,13 @@ A self-contained 29M parameter architecture implementing:
 Target: 7GB VRAM, 7.0/10 expected score on ARC-AGI-3
 """
 
+from .agent import AgentOutput, ARIALiteAgent, create_agent
 from .arbiter import Arbiter, ArbiterDecision, create_arbiter
 from .belief import BeliefOutput, BeliefStateTracker, create_belief_tracker
 from .config import ARIALiteConfig
 from .encoder import GridEncoderLite, create_encoder
 from .fast_policy import FastPolicy, FastPolicyOutput, create_fast_policy
+from .llm import LLMInterface, LLMResponse, create_llm_interface
 from .slow_policy import SlowPolicy, SlowPolicyOutput, create_slow_policy
 from .world_model import EnsembleWorldModel, WorldModelOutput, create_world_model
 
@@ -37,4 +39,10 @@ __all__ = [
     "Arbiter",
     "ArbiterDecision",
     "create_arbiter",
+    "LLMInterface",
+    "LLMResponse",
+    "create_llm_interface",
+    "ARIALiteAgent",
+    "AgentOutput",
+    "create_agent",
 ]

@@ -24,6 +24,7 @@ llm = [
 ]
 aria-lite = [
     "torch>=2.0.0",
+    "llama-cpp-python>=0.2.0",
 ]
 
 [tool.ruff]

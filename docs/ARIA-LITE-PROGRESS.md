@@ -10,16 +10,16 @@
 
 | Metric | Target | Current | Status |
 |--------|--------|---------|--------|
-| Components Complete | 12 | 7 | 🟡 |
+| Components Complete | 12 | 9 | 🟢 |
 | Parameter Budget | 29M | 25.9M | 🟢 |
 | VRAM Usage | <7GB | 1.34GB (est) | 🟢 |
 | Level Completion | >60% | - | ⚪ |
 | Fast/Slow Benefit | >10% | - | ⚪ |
 
-**Current Phase:** Phase 8 - LLM Integration
-**Current Component:** llm.py
+**Current Phase:** Phase 10 - Training Infrastructure
+**Current Component:** training/replay_buffer.py
 **Blockers:** None
-**Tests Passing:** 101/101
+**Tests Passing:** 135/135
 
 ---
 
@@ -34,8 +34,8 @@
 | 5 | fast_policy.py | 🟢 Complete | 0.4M actual | ✅ | All 17 tests pass |
 | 6 | slow_policy.py | 🟢 Complete | 8.5M actual | ✅ | All 18 tests pass |
 | 7 | arbiter.py | 🟢 Complete | 0 (heuristic) | ✅ | All 15 tests pass |
-| 8 | llm.py | ⚪ Not Started | external | ⚪ | |
-| 9 | agent.py | ⚪ Not Started | - | ⚪ | |
+| 8 | llm.py | 🟢 Complete | external | ✅ | All 16 tests pass |
+| 9 | agent.py | 🟢 Complete | - | ✅ | All 18 tests pass |
 | 10 | training/replay_buffer.py | ⚪ Not Started | - | ⚪ | |
 | 11 | training/synthetic_env.py | ⚪ Not Started | - | ⚪ | |
 | 12 | training/trainer.py | ⚪ Not Started | - | ⚪ | |
@@ -143,21 +143,50 @@
 
 ---
 
-### Phase 8: LLM Integration (llm.py)
+### Phase 8: LLM Integration (llm.py) ✅ COMPLETE
+
+**Status:** 🟢 Complete
+**Completed:** 2026-02-03
+
+#### Results
+- LLMInterface with llama-cpp-python support
+- Graceful fallback when model unavailable
+- LRU cache for response caching (1000 entries)
+- GoalEncoder for text→embedding conversion
+- Grid-to-text description for prompts
+- All 16 validation tests pass
+
+---
+
+### Phase 9: Agent Orchestration (agent.py) ✅ COMPLETE
+
+**Status:** 🟢 Complete
+**Completed:** 2026-02-03
+
+#### Results
+- ARIALiteAgent orchestrates all components
+- Full act() loop: encode → belief → fast → arbiter → slow → action
+- World model integration for imagination
+- Value estimation via slow policy
+- Statistics and parameter tracking
+- All 18 validation tests pass
+
+---
+
+### Phase 10: Replay Buffer (training/replay_buffer.py)
 
 **Status:** ⚪ Not Started
 
 #### Plan
-Integrate Llama 3.2 1B for goal hypothesis generation.
+Implement experience replay buffer for training.
 
 #### Success Criteria
-- [ ] Load GGUF model with llama-cpp-python
-- [ ] Goal hypothesis generation from observations
-- [ ] Response caching
-- [ ] ~1GB VRAM usage
+- [ ] Store (s, a, r, s', done) transitions
+- [ ] Uniform and prioritized sampling
+- [ ] Configurable capacity
 
 #### Blockers
-- Need llama-cpp-python dependency
+- None
 
 ---
 
@@ -259,7 +288,7 @@ Integrate Llama 3.2 1B for goal hypothesis generation.
 ## Session Notes
 
 ### Session: 2026-02-03 (Continued)
-**Focus:** Core component implementation
+**Focus:** Complete agent implementation
 
 **Accomplished:**
 - ✅ Phase 1: config.py - Complete (8 tests)
@@ -269,15 +298,16 @@ Integrate Llama 3.2 1B for goal hypothesis generation.
 - ✅ Phase 5: fast_policy.py - Complete (17 tests)
 - ✅ Phase 6: slow_policy.py - Complete (18 tests)
 - ✅ Phase 7: arbiter.py - Complete (15 tests)
-- Added torch to project dependencies (aria-lite extra)
-- Total: 101 tests passing
+- ✅ Phase 8: llm.py - Complete (16 tests)
+- ✅ Phase 9: agent.py - Complete (18 tests)
+- Total: **135 tests passing**
 
-**All core neural components complete. Dual-system architecture ready for integration.**
+**🎉 ARIA-Lite agent fully functional! Ready for training infrastructure.**
 
 **Next Steps:**
-- Phase 8: Implement llm.py (Llama integration) - requires llama-cpp-python
-- Phase 9: Implement agent.py (orchestration)
-- Phases 10-12: Training infrastructure
+- Phase 10: training/replay_buffer.py
+- Phase 11: training/synthetic_env.py
+- Phase 12: training/trainer.py
 
 **Open Questions:**
 - None currently
@@ -305,4 +335,6 @@ Integrate Llama 3.2 1B for goal hypothesis generation.
 | 2026-02-03 | Phase 5 (fast_policy.py) complete - 17 tests pass |
 | 2026-02-03 | Phase 6 (slow_policy.py) complete - 18 tests pass |
 | 2026-02-03 | Phase 7 (arbiter.py) complete - 15 tests pass |
-| 2026-02-03 | **Core neural components complete - 101 tests total** |
+| 2026-02-03 | Phase 8 (llm.py) complete - 16 tests pass |
+| 2026-02-03 | Phase 9 (agent.py) complete - 18 tests pass |
+| 2026-02-03 | **🎉 ARIA-Lite agent complete - 135 tests total** |
