@@ -8,26 +8,45 @@ This is an ARC-AGI-3 competition project implementing the ARIA (Adaptive Reasoni
 
 We are implementing ARIA-Lite, a minimal 29M parameter dual-system architecture to validate the core hypothesis before scaling.
 
+## Progress Tracking (READ FIRST)
+
+**ALWAYS start a session by reading `docs/PROGRESS.md`** - this is the single source of truth for project state.
+
+### Hierarchy
+```
+docs/PROGRESS.md              # TOP LEVEL - Current state & next steps
+docs/PROGRESS-GUIDE.md        # Meta instructions for trackers
+docs/progress/
+├── training-validation.md    # BC/PPO experiments (complete)
+├── arc-agi3-exploration.md   # Game mechanics (complete)
+└── primitives-pretraining.md # Current work
+```
+
+### Update Protocol
+1. **At session start:** Read `docs/PROGRESS.md` to orient
+2. **After completing work:** Update the relevant branch tracker
+3. **After experiments:** Add results with EXP-XXX format
+4. **After decisions:** Document with DEC-XXX format
+5. **At session end:** Ensure state is captured for next session
+
+See `docs/PROGRESS-GUIDE.md` for full format specifications.
+
 ## Key Documents
 
+- **Progress Tracker:** `docs/PROGRESS.md` (READ FIRST, UPDATE REGULARLY)
+- **Progress Guide:** `docs/PROGRESS-GUIDE.md` (format instructions)
 - **Implementation Guide:** `docs/ARIA-LITE-IMPLEMENTATION.md`
-- **Progress Tracker:** `docs/ARIA-LITE-PROGRESS.md` (UPDATE THIS REGULARLY)
-- **Orchestrator Protocol:** `.claude/aria-lite-orchestrator.md`
+- **ARC-AGI-3 Mechanics:** `docs/ARC-AGI3-MECHANICS.md`
 - **Variants Comparison:** `docs/ARIA-VARIANTS.md`
 
-## Orchestration Protocol
+## Specialized Agents
 
-When working on ARIA-Lite implementation:
-
-1. **Always read** `docs/ARIA-LITE-PROGRESS.md` first to understand current state
-2. **Follow** the component workflow in `.claude/aria-lite-orchestrator.md`
-3. **Update** the progress tracker after each significant action
-4. **Use specialized agents** for their designated tasks:
-   - `python-ml-architect` → Code structure, ML patterns
-   - `multimodal-action-architect` → Architecture decisions
-   - `rl-training-expert` → Training strategy
-   - `experiment-manager` → Metrics, experiments, tracking
-   - `arc-agi-evaluator` → Component scoring
+Use these agents for their designated tasks:
+- `python-ml-architect` → Code structure, ML patterns
+- `multimodal-action-architect` → Architecture decisions
+- `rl-training-expert` → Training strategy
+- `experiment-manager` → Metrics, experiments, tracking
+- `arc-agi-evaluator` → Component scoring
 
 ## Gate Decisions
 

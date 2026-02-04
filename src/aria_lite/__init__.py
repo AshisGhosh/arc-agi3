@@ -11,6 +11,7 @@ Target: 7GB VRAM, 7.0/10 expected score on ARC-AGI-3
 
 from .agent import AgentOutput, ARIALiteAgent, create_agent
 from .arbiter import Arbiter, ArbiterDecision, create_arbiter
+from .arc_agent import ARCAgentConfig, ARCAGIAgent, create_arc_agent
 from .belief import BeliefOutput, BeliefStateTracker, create_belief_tracker
 from .config import ARIALiteConfig
 from .encoder import GridEncoderLite, create_encoder
@@ -45,4 +46,8 @@ __all__ = [
     "ARIALiteAgent",
     "AgentOutput",
     "create_agent",
+    # ARC-AGI-3 integration
+    "ARCAGIAgent",
+    "ARCAgentConfig",
+    "create_arc_agent",
 ]
