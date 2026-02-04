@@ -70,6 +70,8 @@ arc-agi3/
 │   ├── BUILDING-AGENTS.md       # Agent development guide
 │   ├── SOLUTION-PROPOSALS.md    # Solution approaches & evaluation
 │   ├── ARIA-VARIANTS.md         # ARIA implementation variants (Lite/Standard/Max)
+│   ├── ARIA-LITE-IMPLEMENTATION.md  # Detailed ARIA-Lite implementation guide
+│   ├── ARIA-LITE-PROGRESS.md    # Live progress tracker
 │   ├── ARC-DREAMER-V2.md        # ARC-Dreamer v2 architecture
 │   ├── NEUROSYMBOLIC-V2-ARCHITECTURE.md  # Neurosymbolic v2 architecture
 │   └── HYBRID-ARCHITECTURE.md   # ARIA hybrid architecture

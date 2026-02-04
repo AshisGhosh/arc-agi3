@@ -1,0 +1,1 @@
+"""ARIA-Lite tests."""
