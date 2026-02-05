@@ -30,7 +30,7 @@ Observation → Visual Grounding → Language Description
            Subgoal Executor → Navigate to next diamond
 ```
 
-See [ARIA v2 Architecture](ARIA-V2-ARCHITECTURE.md) for full details.
+See [ARIA v2 Architecture](current/ARCHITECTURE.md) for full details.
 
 ## Latest Findings (EXP-013: PPO Training)
 **Implemented PPO training on ARC-AGI-3:**
@@ -143,9 +143,9 @@ See [ARIA v2 Architecture](ARIA-V2-ARCHITECTURE.md) for full details.
 - [x] Human demo analysis - all 12 successful
 
 ## Links
-- [**ARIA v2 Architecture**](ARIA-V2-ARCHITECTURE.md) - Language-guided meta-learning (CURRENT)
-- [ARIA v2 Implementation Plan](ARIA-V2-IMPLEMENTATION-PLAN.md) - 5-phase build plan
-- [Technical Report](TECHNICAL-REPORT.md) - Comprehensive decisions, experiments, and learnings
-- [ARC-AGI-3 Mechanics](ARC-AGI3-MECHANICS.md) - Game analysis
-- [ARIA v1 Results](../experiments/aria_v1/results/summary.md) - Archived experiment outcomes
-- [ARIA-Lite Implementation](archive/ARIA-LITE-IMPLEMENTATION.md) - Original architecture (archived)
+- [**ARIA v2 Architecture**](current/ARCHITECTURE.md) - Language-guided meta-learning (CURRENT)
+- [ARIA v2 Implementation Plan](current/IMPLEMENTATION-PLAN.md) - 5-phase build plan
+- [ARIA v1 Technical Report](findings/ARIA-V1-REPORT.md) - Decisions, experiments, learnings
+- [Game Mechanics Analysis](reference/GAME-MECHANICS.md) - ls20, vc33, ft09 analysis
+- [ARIA v1 Experiment Results](../experiments/aria_v1/results/summary.md) - Metrics and outcomes
+- [Archived Architectures](archive/architectures/) - v1 approaches (deprecated)

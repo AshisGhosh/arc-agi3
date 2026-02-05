@@ -1,38 +1,94 @@
 # Documentation Index
 
-## Current Architecture: ARIA v2
+## Quick Navigation
+
+| What you need | Where to look |
+|---------------|---------------|
+| Current architecture & plan | `current/` |
+| How to use ARC-AGI-3 API | `reference/` |
+| What we learned from v1 | `findings/` |
+| Old/abandoned approaches | `archive/` |
+
+---
+
+## Current Development (ARIA v2)
+
+**Status:** Active development
 
 | Document | Description |
 |----------|-------------|
-| [ARIA-V2-ARCHITECTURE.md](ARIA-V2-ARCHITECTURE.md) | Language-guided meta-learning architecture |
-| [ARIA-V2-IMPLEMENTATION-PLAN.md](ARIA-V2-IMPLEMENTATION-PLAN.md) | 5-phase implementation plan |
-| [PROGRESS.md](PROGRESS.md) | Current project state and next steps |
-| [TECHNICAL-REPORT.md](TECHNICAL-REPORT.md) | Decisions, experiments, learnings |
+| [PROGRESS.md](PROGRESS.md) | Project state, next steps, recent completions |
+| [current/ARCHITECTURE.md](current/ARCHITECTURE.md) | Language-guided meta-learning architecture |
+| [current/IMPLEMENTATION-PLAN.md](current/IMPLEMENTATION-PLAN.md) | 5-phase implementation plan |
 
-## Reference
+---
 
-| Document | Description |
-|----------|-------------|
-| [ARC-AGI-3-OVERVIEW.md](ARC-AGI-3-OVERVIEW.md) | Competition overview |
-| [ARC-AGI3-MECHANICS.md](ARC-AGI3-MECHANICS.md) | Game mechanics analysis |
-| [API-GUIDE.md](API-GUIDE.md) | ARC-AGI-3 API usage |
-| [BUILDING-AGENTS.md](BUILDING-AGENTS.md) | Agent development guide |
-| [PROGRESS-GUIDE.md](PROGRESS-GUIDE.md) | Documentation format guide |
+## Reference Material
 
-## Archived (ARIA v1)
-
-Historical documents from the first architecture attempt:
+**Status:** Always useful, competition-specific
 
 | Document | Description |
 |----------|-------------|
-| [archive/ARIA-LITE-IMPLEMENTATION.md](archive/ARIA-LITE-IMPLEMENTATION.md) | Original v1 architecture |
-| [archive/ARIA-VARIANTS.md](archive/ARIA-VARIANTS.md) | Architecture variants comparison |
-| [archive/progress/](archive/progress/) | v1 experiment tracking |
-| [archive/ARC-DREAMER-V2.md](archive/ARC-DREAMER-V2.md) | World model architecture |
-| [archive/HYBRID-ARCHITECTURE.md](archive/HYBRID-ARCHITECTURE.md) | Hybrid approach design |
-| [archive/NEUROSYMBOLIC-V2-ARCHITECTURE.md](archive/NEUROSYMBOLIC-V2-ARCHITECTURE.md) | Neurosymbolic approach |
-| [archive/SOLUTION-PROPOSALS.md](archive/SOLUTION-PROPOSALS.md) | Initial solution ideas |
+| [reference/ARC-AGI-3-OVERVIEW.md](reference/ARC-AGI-3-OVERVIEW.md) | Competition overview, scoring, timeline |
+| [reference/API-GUIDE.md](reference/API-GUIDE.md) | `arc-agi` package usage, GameAction, FrameData |
+| [reference/BUILDING-AGENTS.md](reference/BUILDING-AGENTS.md) | Agent interface, strategies, templates |
+| [reference/GAME-MECHANICS.md](reference/GAME-MECHANICS.md) | ls20, vc33, ft09 game analysis |
 
-## Experiment Results
+---
 
-See [experiments/aria_v1/results/summary.md](../experiments/aria_v1/results/summary.md) for v1 experiment outcomes.
+## Historical Findings
+
+**Status:** Valuable learnings from completed experiments
+
+| Document | Description |
+|----------|-------------|
+| [findings/ARIA-V1-REPORT.md](findings/ARIA-V1-REPORT.md) | ARIA v1 experiments, decisions, lessons learned |
+| [experiments/aria_v1/results/summary.md](../experiments/aria_v1/results/summary.md) | V1 experiment metrics and outcomes |
+
+### Key Takeaways from v1
+
+- BC achieves 80% accuracy but 0% level completion (mode collapse)
+- PPO with sparse reward: 0.18% success rate
+- World model learns dynamics (0.033 loss) but not goals
+- ls20 is a puzzle game requiring state matching, not just navigation
+- Need language-based reasoning to understand game rules
+
+---
+
+## Archive
+
+**Status:** Superseded or abandoned approaches
+
+| Folder | Contents |
+|--------|----------|
+| [archive/architectures/](archive/architectures/) | Old architecture designs (Dreamer, Hybrid, Neurosymbolic) |
+| [archive/v1-progress/](archive/v1-progress/) | V1 progress tracking files |
+| [archive/internal/](archive/internal/) | Process documentation |
+
+---
+
+## Directory Structure
+
+```
+docs/
+├── README.md              # This file
+├── PROGRESS.md            # Current state (start here)
+│
+├── current/               # ARIA v2 (what we're building)
+│   ├── ARCHITECTURE.md
+│   └── IMPLEMENTATION-PLAN.md
+│
+├── reference/             # Competition & API docs
+│   ├── ARC-AGI-3-OVERVIEW.md
+│   ├── API-GUIDE.md
+│   ├── BUILDING-AGENTS.md
+│   └── GAME-MECHANICS.md
+│
+├── findings/              # What we learned
+│   └── ARIA-V1-REPORT.md
+│
+└── archive/               # Old/abandoned work
+    ├── architectures/
+    ├── v1-progress/
+    └── internal/
+```
