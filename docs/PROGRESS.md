@@ -6,9 +6,10 @@
 **Status:** 🟢 On Track
 
 ## Immediate Next Step
-Improve game demos (need successful trajectories) or implement game-specific experts.
+Download human gameplay videos and run video_demo_extractor.py to extract successful trajectories.
 
 ## Recent Completions
+- [2026-02-04] **Video demo extractor**: OCR-based extraction from gameplay videos (video_demo_extractor.py)
 - [2026-02-04] **Few-shot training pipeline**: Demo collector + train_arc_fewshot.py (100% train accuracy)
 - [2026-02-04] **Demo collection**: 110 demos across 3 games (ls20, vc33, ft09)
 - [2026-02-04] **ARC-AGI-3 integration complete**: Created adapter (`arc_agent.py`) and validation script
@@ -46,10 +47,11 @@ Improve game demos (need successful trajectories) or implement game-specific exp
 - [x] Collect demonstrations from game exploration (110 demos collected)
 - [x] Fine-tune meta-learning model on game-specific demos (100% train accuracy)
 - [x] Test few-shot adaptation (K=3 demos) - 0% success (needs better demos)
-- [ ] **BLOCKER:** Need successful game trajectories for meaningful training
-- [ ] Option A: Implement game-specific experts (A* for ls20 navigation)
-- [ ] Option B: Use human demonstrations (record successful play)
-- [ ] Option C: Use reinforcement learning to discover solutions
+- [x] Created video_demo_extractor.py for OCR-based extraction from gameplay videos
+- [ ] Download human gameplay videos from Google Drive
+- [ ] Run video_demo_extractor.py to extract successful human demonstrations
+- [ ] Retrain meta-learning model with human demos
+- [ ] Evaluate few-shot performance with quality demos
 
 ## Links
 - [Progress Guide](PROGRESS-GUIDE.md) - Format instructions for all trackers
