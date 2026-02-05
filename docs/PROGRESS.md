@@ -56,6 +56,7 @@ Fix mode collapse in meta-learning model - currently predicts most common action
 - [ ] Option C: Train with RL to discover solutions
 
 ## Links
+- [Technical Report](TECHNICAL-REPORT.md) - Comprehensive decisions, experiments, and learnings
 - [Progress Guide](PROGRESS-GUIDE.md) - Format instructions for all trackers
 - [ARC-AGI-3 Mechanics](ARC-AGI3-MECHANICS.md) - Game analysis
 - [ARIA-Lite Implementation](ARIA-LITE-IMPLEMENTATION.md) - Component design

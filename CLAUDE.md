@@ -34,10 +34,57 @@ See `docs/PROGRESS-GUIDE.md` for full format specifications.
 ## Key Documents
 
 - **Progress Tracker:** `docs/PROGRESS.md` (READ FIRST, UPDATE REGULARLY)
+- **Technical Report:** `docs/TECHNICAL-REPORT.md` (comprehensive decisions & learnings)
 - **Progress Guide:** `docs/PROGRESS-GUIDE.md` (format instructions)
 - **Implementation Guide:** `docs/ARIA-LITE-IMPLEMENTATION.md`
 - **ARC-AGI-3 Mechanics:** `docs/ARC-AGI3-MECHANICS.md`
 - **Variants Comparison:** `docs/ARIA-VARIANTS.md`
+
+## Continuous Documentation (CRITICAL)
+
+**Every significant action must be documented.** This project requires detailed tracking for reproducibility and learning.
+
+### What to Document
+
+1. **Decisions (DEC-XXX format):**
+   - Context: What problem were we solving?
+   - Options considered: What alternatives existed?
+   - Decision: What did we choose?
+   - Rationale: WHY did we choose it? (most important)
+   - Outcome: What happened?
+
+2. **Experiments (EXP-XXX format):**
+   - Goal: What hypothesis are we testing?
+   - Method: Exact setup, hyperparameters, data
+   - Result: Metrics, success/failure
+   - Key Learning: What did we learn?
+
+3. **Blockers:**
+   - Problem description
+   - Root cause analysis
+   - Potential solutions with trade-offs
+
+4. **Architecture changes:**
+   - What changed and why
+   - Trade-offs made
+   - Impact on other components
+
+### Where to Document
+
+| Type | Location |
+|------|----------|
+| Current state | `docs/PROGRESS.md` |
+| Experiment details | `docs/progress/*.md` |
+| Decisions & learnings | `docs/TECHNICAL-REPORT.md` |
+| Architecture rationale | Code comments + TECHNICAL-REPORT.md |
+
+### When to Document
+
+- **Before starting:** Read existing docs to avoid repeating work
+- **During work:** Note unexpected findings immediately
+- **After experiments:** Record results even if negative
+- **After decisions:** Document rationale while fresh
+- **End of session:** Update PROGRESS.md with current state
 
 ## Specialized Agents
 
