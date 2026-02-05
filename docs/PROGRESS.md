@@ -6,18 +6,24 @@
 **Status:** 🟢 On Track
 
 ## Immediate Next Step
-Implement A* expert for ls20 to understand game mechanics and generate perfect demonstrations.
+Implement A* expert for ls20 to generate goal-directed demonstrations that understand game mechanics.
 
-## Latest Findings (EXP-010)
-**Simple BC on human demos fails despite multiple fixes:**
-1. Fixed observation quantization (values 0-15, not 0-255) - accuracy 38%→62%
-2. Fixed grid size (16x16 preserves agent marker) - accuracy 62%→73%
-3. Used full trajectories (500 steps) - accuracy 73%→80%, 5905 samples
-4. Still 0 levels completed even with 30% exploration
+## Latest Findings (EXP-011: ARIA Architecture Integration)
+**Integrated BC training with full ARIA architecture (encoder + fast policy):**
+1. Full ARIA encoder (8.5M params) with 64x64 inputs: 31% accuracy - too large for 5905 samples
+2. Simple encoder (0.6M params) with 16x16 inputs: 79% accuracy - matches standalone BC
+3. Loop detection reveals **220+ loops per 300 steps** - policy gets stuck immediately
+4. Confidence now ~50% low (vs 100% before) - arbiter would trigger slow policy
+5. Random exploration (30% epsilon + loop breaking) still gets 0 levels
 
-**Root cause:** BC learns state→action mapping but creates loops. Model needs temporal context or game understanding that pure imitation doesn't provide.
+**Key insight:** The dual-system architecture is working correctly - fast policy is uncertain and would trigger slow policy. But we don't have a trained slow policy yet!
 
-**Next:** Option B - A* expert to understand what makes a valid solution.
+**Root cause:** BC learns state→action mapping without understanding goals. The agent navigates in loops because it doesn't know "where to go" (key positions, lock positions).
+
+**Next steps:**
+1. Implement A* expert to generate goal-directed trajectories (knows where keys/locks are)
+2. Use A* demonstrations to understand game mechanics
+3. Train slow policy to plan toward goals when fast policy is uncertain
 
 ## Recent Completions
 - [2026-02-04] **Human demos loaded**: 28 demos (27 successful) from JSONL recordings via `jsonl_demo_loader.py`
@@ -61,10 +67,12 @@ Implement A* expert for ls20 to understand game mechanics and generate perfect d
 - [x] Test few-shot adaptation (K=3 demos) - 0% success (mode collapse)
 - [x] Load human demos from JSONL recordings (28 demos, 27 successful)
 - [x] Retrain meta-learning model with human demos
-- [ ] **Fix mode collapse**: Model predicts action 1 (UP) regardless of state
-- [ ] Option A: Behavioral cloning with observation-conditioned policy
-- [ ] Option B: Use game-specific expert policies (A* for navigation)
-- [ ] Option C: Train with RL to discover solutions
+- [x] Integrate BC with ARIA architecture (encoder + fast policy + arbiter)
+- [x] Add loop detection - confirmed 75% of steps are loops
+- [ ] **Implement A* expert** for ls20 navigation (understands goal locations)
+- [ ] Generate goal-directed demonstrations with A* expert
+- [ ] Train slow policy for deliberate planning when fast policy uncertain
+- [ ] Test full dual-system (fast BC + slow planning)
 
 ## Links
 - [Technical Report](TECHNICAL-REPORT.md) - Comprehensive decisions, experiments, and learnings

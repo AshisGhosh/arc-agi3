@@ -165,6 +165,22 @@ A 29M parameter dual-system architecture:
 
 **Key Learning:** Model collapses to predicting most common action (UP=74.5%).
 
+### Phase 4: ARIA Architecture Integration (2026-02-05)
+
+| ID | Goal | Result | Key Learning |
+|----|------|--------|--------------|
+| EXP-011a | Full encoder BC | 31% acc, 0 levels | 8.5M params too large for 5905 samples |
+| EXP-011b | Simple encoder BC | 79% acc, 0 levels | Matches standalone BC accuracy |
+| EXP-011c | Loop detection | 220+/300 loops | BC creates loops immediately |
+| EXP-011d | Exploration (30%) | 0 levels | Random exploration insufficient |
+
+**Key Learning:**
+- Simple encoder achieves same accuracy as standalone BC (79%)
+- Loop detection confirms policy gets stuck in 75% of steps
+- Confidence is ~50% low - arbiter correctly triggers slow policy need
+- But no trained slow policy exists yet to help when fast policy uncertain
+- Need goal-directed exploration (A* expert) instead of random exploration
+
 ---
 
 ## 4. Current Blocker: Mode Collapse
