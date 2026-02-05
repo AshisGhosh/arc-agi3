@@ -6,14 +6,15 @@
 **Status:** 🟢 Ready to implement
 
 ## Immediate Next Step
-**Phase 1.1:** Create synthetic game generator (`src/aria_v2/pretraining/synthetic_games.py`)
-- Generate procedural games with labeled entities (player, goal, item, obstacle, trigger)
-- Target: 10k labeled game states for training entity detector
+**Phase 1.2:** Create entity detector CNN (`src/aria_v2/visual_grounding.py`)
+- Detect non-background entities in grid
+- Target: >95% entity detection recall
 
 ## Code Status
 | Component | File | Status |
 |-----------|------|--------|
 | Configuration | `src/aria_v2/config.py` | ✅ Done |
+| Synthetic Games | `src/aria_v2/pretraining/synthetic_games.py` | ✅ Done |
 | Visual Grounding | `src/aria_v2/visual_grounding.py` | ⚪ Not started |
 | Event Detector | `src/aria_v2/event_detector.py` | ⚪ Not started |
 | LLM Reasoning | `src/aria_v2/llm_reasoning.py` | ⚪ Not started |
@@ -73,6 +74,7 @@ See [ARIA v2 Architecture](current/ARCHITECTURE.md) for full details.
 - BC learns imitation but not goal understanding
 
 ## Recent Completions
+- [2026-02-05] **Phase 1.1 complete**: Synthetic game generator with labeled entities (player, goal, item, obstacle, trigger)
 - [2026-02-05] **Docs reorganized**: Structured into current/, reference/, findings/, archive/
 - [2026-02-05] **ARIA v2 config**: Created `src/aria_v2/config.py` with component configurations
 - [2026-02-05] **ARIA v2 Architecture**: Designed language-guided meta-learning system
@@ -109,7 +111,7 @@ See [ARIA v2 Architecture](current/ARCHITECTURE.md) for full details.
 ## Next Steps - ARIA v2 Implementation
 
 ### Phase 1: Visual Grounding (Pretraining)
-- [ ] Create synthetic game generator with labeled entities
+- [x] Create synthetic game generator with labeled entities
 - [ ] Implement VisualGroundingModule (entity detection + classification)
 - [ ] Train entity detector (player, goal, item, obstacle, trigger)
 - [ ] Train movement correlator (what moves when action taken)
