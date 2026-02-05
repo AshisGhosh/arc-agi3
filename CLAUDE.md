@@ -4,9 +4,23 @@
 
 This is an ARC-AGI-3 competition project implementing the ARIA (Adaptive Reasoning with Integrated Abstractions) architecture.
 
-## Current Focus: ARIA-Lite
+## Current Focus: ARIA v2 - Language-Guided Meta-Learning
 
-We are implementing ARIA-Lite, a minimal 29M parameter dual-system architecture to validate the core hypothesis before scaling.
+We shifted from ARIA-Lite (end-to-end neural) to ARIA v2 (language-guided reasoning) because:
+- BC/PPO couldn't learn puzzle game mechanics from sparse rewards
+- Need meta-learning that understands game rules, not just mimics actions
+- Language provides transferable representation for game understanding
+
+**Core Architecture:**
+```
+Observation → Visual Grounding → Language Description
+                    ↓
+           Event Detection → "Player touched diamond, score +1"
+                    ↓
+           LLM Reasoning → "Diamonds are collectibles"
+                    ↓
+           Subgoal Executor → Navigate to next diamond
+```
 
 ## Progress Tracking (READ FIRST)
 
@@ -34,11 +48,12 @@ See `docs/PROGRESS-GUIDE.md` for full format specifications.
 ## Key Documents
 
 - **Progress Tracker:** `docs/PROGRESS.md` (READ FIRST, UPDATE REGULARLY)
+- **ARIA v2 Architecture:** `docs/ARIA-V2-ARCHITECTURE.md` (CURRENT APPROACH)
+- **ARIA v2 Implementation Plan:** `docs/ARIA-V2-IMPLEMENTATION-PLAN.md`
 - **Technical Report:** `docs/TECHNICAL-REPORT.md` (comprehensive decisions & learnings)
 - **Progress Guide:** `docs/PROGRESS-GUIDE.md` (format instructions)
-- **Implementation Guide:** `docs/ARIA-LITE-IMPLEMENTATION.md`
 - **ARC-AGI-3 Mechanics:** `docs/ARC-AGI3-MECHANICS.md`
-- **Variants Comparison:** `docs/ARIA-VARIANTS.md`
+- **ARIA-Lite (deprecated):** `docs/ARIA-LITE-IMPLEMENTATION.md`
 
 ## Continuous Documentation (CRITICAL)
 
@@ -105,20 +120,27 @@ For each component, make explicit PASS/ITERATE/BLOCKED decisions:
 ## Code Location
 
 ```
-src/aria_lite/          # ARIA-Lite implementation (to be created)
-src/aria/               # Original ARIA (reference, some reuse)
-src/arc_dreamer_v2/     # World model, belief tracking (reuse)
-src/arc_neurosymbolic_v2/  # DSL, reasoning (reference)
+src/aria_v2/            # ARIA v2 implementation (CURRENT)
+├── visual_grounding.py # Entity detection
+├── event_detector.py   # Change tracking
+├── llm_reasoning.py    # LLM integration
+├── subgoal_executor.py # Navigation
+└── agent.py            # Integrated agent
+
+src/aria_lite/          # ARIA v1 (deprecated, reference only)
+src/aria/               # Original ARIA (reference)
+src/arc_dreamer_v2/     # World model, belief tracking
 ```
 
-## Success Criteria
+## Success Criteria (ARIA v2)
 
 | Metric | Target |
 |--------|--------|
-| Level completion (seen) | >60% |
-| Fast/slow switching benefit | >10% |
-| World model error (5-step) | <30% |
-| Training VRAM | <7GB |
+| Entity detection accuracy | >90% |
+| Navigation success rate | >95% |
+| Rule discovery rate | >50% |
+| ARC level completion | >10% |
+| Adaptation speed | <50 steps to correct hypothesis |
 
 ## Git Commits
 

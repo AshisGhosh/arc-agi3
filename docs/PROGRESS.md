@@ -1,40 +1,72 @@
 # Project Progress
 
 ## Current State
-**Phase:** Primitives Pretraining Complete → ARC-AGI-3 Few-Shot Adaptation
+**Phase:** ARIA v2 - Language-Guided Meta-Learning Architecture
 **Branch:** main
-**Status:** 🟢 On Track
+**Status:** 🟢 New Direction - Shifting to language-based reasoning
 
 ## Immediate Next Step
-Implement A* expert for ls20 to generate goal-directed demonstrations that understand game mechanics.
+Implement ARIA v2 architecture: Visual Grounding → Event Detection → LLM Reasoning → Subgoal Execution
 
-## Latest Findings (EXP-012: Full ARIA Integration)
-**Integrated all ARIA components:**
-1. **BC Fast Policy**: 79% train accuracy, but loops during evaluation
-2. **World Model**: Trained on 5893 transitions, state_loss=0.033, uncertainty=0.15
-3. **Slow Policy Deliberation**: Uses world model to evaluate actions, adds curiosity bonus
-4. **Result**: Still 0 levels - 286 loops per episode
+## Architecture Shift: ARIA v1 → ARIA v2
 
-**Architecture working correctly:**
-- Fast policy trains well (79% accuracy)
-- World model learns dynamics (low prediction error)
-- Arbiter triggers slow policy (100% slow due to low confidence)
-- Slow policy uses world model for action evaluation
+**Why the change:**
+- ARIA v1 (end-to-end neural) couldn't learn ls20 puzzle mechanics
+- BC achieves 80% accuracy but 0% level completion (wrong policy)
+- PPO with sparse reward couldn't discover goals (0.18% success)
+- Need meta-learning that understands game rules, not just mimics actions
 
-**Root cause identified:**
-- **Sparse reward**: Game only gives `levels_completed` signal
-- **No goal direction**: World model predicts dynamics but not what leads to reward
-- **BC limitation**: Imitates trajectories but doesn't understand goals
-- **Curiosity insufficient**: Exploring novel states ≠ reaching goals
+**ARIA v2 Core Insight:**
+> "Understand games in language, then act"
 
-**Conclusion:** Need RL to discover what leads to reward through interaction.
+**New Architecture:**
+```
+Observation → Visual Grounding → Language Description
+                    ↓
+           Event Detection → "Player touched diamond, score +1"
+                    ↓
+           LLM Reasoning → "Diamonds are collectibles, goal is collect all"
+                    ↓
+           Subgoal Executor → Navigate to next diamond
+```
 
-**Next steps:**
-1. Implement PPO training with sparse reward from level completion
-2. Use world model for imagination/planning during RL
-3. Add reward shaping if needed (e.g., intermediate progress signals)
+See [ARIA v2 Architecture](ARIA-V2-ARCHITECTURE.md) for full details.
+
+## Latest Findings (EXP-013: PPO Training)
+**Implemented PPO training on ARC-AGI-3:**
+1. **PPO v1**: 3/1712 episodes reached levels (0.18% success rate)
+2. **PPO v2 (improved rewards)**: First test showed 10/500 success, but full run: 0/1700+ episodes
+3. **BC with class weights**: Backfired - NOOP dominated (49.6%), worse than before
+
+**Key discoveries about ls20:**
+- ls20 is a PUZZLE game, not just navigation
+- Requires: navigate to target + match state (sprite/color/rotation)
+- Human demos: balanced actions (UP 31%, DOWN 28%, LEFT 20%, RIGHT 21%)
+- Human average: 400-850 steps to complete all 7 levels
+- All 12 human demos successful (11 won, 1 got 6 levels)
+
+**What we tried:**
+| Approach | Result | Issue |
+|----------|--------|-------|
+| BC (79% acc) | 0 levels | Mode collapse, loops |
+| World Model | state_loss=0.033 | Learns dynamics, not goals |
+| PPO v1 | 0.18% success | Sparse reward too hard |
+| PPO v2 (stronger rewards) | 0% | High variance, no learning |
+| BC + class weights | 0% | NOOP dominated |
+| BC + random exploration | 0% | Ineffective |
+
+**Root cause confirmed:**
+- ls20 requires understanding game mechanics (state matching)
+- Random/RL exploration insufficient for puzzle games
+- BC learns imitation but not goal understanding
 
 ## Recent Completions
+- [2026-02-05] **ARIA v2 Architecture**: Designed language-guided meta-learning system (see ARIA-V2-ARCHITECTURE.md)
+- [2026-02-05] **Architecture decision**: Shift from end-to-end neural to language-based reasoning
+- [2026-02-05] **PPO training implemented**: train_ppo_arc.py with reward shaping, achieved 0.18% success rate
+- [2026-02-05] **ls20 game analysis**: Identified as puzzle game requiring state matching (not just navigation)
+- [2026-02-05] **Human demo analysis**: 12 demos, all successful, balanced action distribution
+- [2026-02-05] **BC class weighting**: Attempted inverse frequency weighting, backfired (NOOP dominated)
 - [2026-02-04] **Human demos loaded**: 28 demos (27 successful) from JSONL recordings via `jsonl_demo_loader.py`
 - [2026-02-04] **Mode collapse identified**: Model learns action distribution, not game logic (needs architecture fix)
 - [2026-02-04] **Few-shot training pipeline**: Demo collector + train_arc_fewshot.py (92.9% train accuracy)
@@ -70,21 +102,49 @@ Implement A* expert for ls20 to generate goal-directed demonstrations that under
 - [x] **Meta-learning approach:** Context-conditioned with FiLM (Nav 76%, Click 100%)
 - [x] **Evaluation strategy:** Using 3 local games (ls20, vc33, ft09) for offline testing
 
-## Next Steps
-- [x] Collect demonstrations from game exploration (110 demos collected)
-- [x] Fine-tune meta-learning model on game-specific demos (92.9% train accuracy)
-- [x] Test few-shot adaptation (K=3 demos) - 0% success (mode collapse)
-- [x] Load human demos from JSONL recordings (28 demos, 27 successful)
-- [x] Retrain meta-learning model with human demos
-- [x] Integrate BC with ARIA architecture (encoder + fast policy + arbiter)
-- [x] Add loop detection - confirmed 75% of steps are loops
-- [ ] **Implement A* expert** for ls20 navigation (understands goal locations)
-- [ ] Generate goal-directed demonstrations with A* expert
-- [ ] Train slow policy for deliberate planning when fast policy uncertain
-- [ ] Test full dual-system (fast BC + slow planning)
+## Next Steps - ARIA v2 Implementation
+
+### Phase 1: Visual Grounding (Pretraining)
+- [ ] Create synthetic game generator with labeled entities
+- [ ] Implement VisualGroundingModule (entity detection + classification)
+- [ ] Train entity detector (player, goal, item, obstacle, trigger)
+- [ ] Train movement correlator (what moves when action taken)
+- [ ] Validate: >90% entity detection accuracy
+
+### Phase 2: Event Detection
+- [ ] Implement EventDetector (track state changes)
+- [ ] Build cause-effect relationship detector
+- [ ] Test on human demo recordings
+- [ ] Validate: correctly identifies item collection, level completion
+
+### Phase 3: LLM Reasoning
+- [ ] Download Llama 3.2 1B (GGUF quantized)
+- [ ] Implement LLMReasoningEngine
+- [ ] Create prompts for: event interpretation, goal hypothesis, subgoal generation
+- [ ] Add response caching for efficiency
+- [ ] Validate: reasonable hypotheses on synthetic games
+
+### Phase 4: Subgoal Executor
+- [ ] Implement PretrainedNavigationPolicy (A* based)
+- [ ] Train on synthetic navigation tasks
+- [ ] Add obstacle avoidance
+- [ ] Validate: >95% navigation success rate
+
+### Phase 5: Integration
+- [ ] Implement ARIAv2Agent (full pipeline)
+- [ ] Test on ls20 with language trace logging
+- [ ] Evaluate rule discovery rate
+- [ ] Target: >10% level completion on ARC-AGI-3
+
+## Completed (ARIA v1)
+- [x] BC training - 80% accuracy, 0% eval
+- [x] PPO training - 0.18% success
+- [x] World model - learns dynamics
+- [x] Human demo analysis - all 12 successful
 
 ## Links
+- [**ARIA v2 Architecture**](ARIA-V2-ARCHITECTURE.md) - Language-guided meta-learning (CURRENT)
 - [Technical Report](TECHNICAL-REPORT.md) - Comprehensive decisions, experiments, and learnings
 - [Progress Guide](PROGRESS-GUIDE.md) - Format instructions for all trackers
 - [ARC-AGI-3 Mechanics](ARC-AGI3-MECHANICS.md) - Game analysis
-- [ARIA-Lite Implementation](ARIA-LITE-IMPLEMENTATION.md) - Component design
+- [ARIA-Lite Implementation](ARIA-LITE-IMPLEMENTATION.md) - Original architecture (deprecated)

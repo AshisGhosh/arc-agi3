@@ -40,7 +40,7 @@ class ARIADemoDataset(Dataset):
     def __init__(
         self,
         demo_datasets: list[DemoDataset],
-        max_steps_per_demo: int = 500,
+        max_steps_per_demo: int = 10000,  # Use all steps by default
         grid_size: int = 16,
     ):
         self.observations = []
@@ -120,6 +120,25 @@ class ARIABCTrainer:
         print(f"Fast policy params: {fp_params:,}")
         print(f"Total trainable: {enc_params + fp_params:,}")
 
+        # Class weights (will be computed from data)
+        self.class_weights = None
+
+    def set_class_weights(self, actions: list[int], num_classes: int = None):
+        """Compute class weights for balanced training."""
+        from collections import Counter
+        counts = Counter(actions)
+        # Use the number of actions from fast policy config
+        if num_classes is None:
+            num_classes = self.config.fast_policy.num_actions
+        total = len(actions)
+        # Inverse frequency weighting
+        weights = []
+        for i in range(num_classes):
+            count = counts.get(i, 1)  # Avoid div by zero, use 1 for missing classes
+            weights.append(total / (num_classes * count))
+        self.class_weights = torch.tensor(weights, device=self.device, dtype=torch.float)
+        print(f"Class weights ({num_classes} classes): {[f'{w:.2f}' for w in weights]}")
+
     def train_epoch(self, dataloader: DataLoader) -> dict:
         """Train for one epoch."""
         self.encoder.train()
@@ -143,8 +162,8 @@ class ARIABCTrainer:
             # Get fast policy output
             action_logits = self.fast_policy(state).action_logits
 
-            # BC loss
-            loss = F.cross_entropy(action_logits, actions)
+            # BC loss with optional class weighting
+            loss = F.cross_entropy(action_logits, actions, weight=self.class_weights)
 
             self.optimizer.zero_grad()
             loss.backward()
@@ -365,6 +384,9 @@ def main():
         use_simple_encoder=not args.use_full_encoder,
         grid_size=args.grid_size,
     )
+
+    # Compute and set class weights for balanced training
+    trainer.set_class_weights(train_dataset.actions)
 
     # Training loop
     print(f"\nTraining for {args.epochs} epochs...")

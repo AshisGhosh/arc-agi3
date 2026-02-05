@@ -1,53 +1,36 @@
 """
-ARIA-Lite: Minimal Dual-System Architecture for ARC-AGI-3
+ARIA-Lite: Core Components (Archived)
 
-A self-contained 29M parameter architecture implementing:
-- Fast policy (neural habits)
-- Slow policy (deliberate planning)
-- Metacognitive arbiter for system switching
+This module contains reusable components from the ARIA v1 experiments.
+The full v1 implementation has been archived to experiments/aria_v1/.
 
-Target: 7GB VRAM, 7.0/10 expected score on ARC-AGI-3
+For the current approach, see src/aria_v2/ (Language-Guided Meta-Learning).
 """
 
-from .agent import AgentOutput, ARIALiteAgent, create_agent
-from .arbiter import Arbiter, ArbiterDecision, create_arbiter
-from .arc_agent import ARCAgentConfig, ARCAGIAgent, create_arc_agent
-from .belief import BeliefOutput, BeliefStateTracker, create_belief_tracker
 from .config import ARIALiteConfig
 from .encoder import GridEncoderLite, create_encoder
+from .encoder_simple import SimpleGridEncoder
 from .fast_policy import FastPolicy, FastPolicyOutput, create_fast_policy
-from .llm import LLMInterface, LLMResponse, create_llm_interface
-from .slow_policy import SlowPolicy, SlowPolicyOutput, create_slow_policy
 from .world_model import EnsembleWorldModel, WorldModelOutput, create_world_model
+from .demo_collector import DemoDataset, GameDemo
 
 __version__ = "0.1.0"
 __all__ = [
+    # Configuration
     "ARIALiteConfig",
+    # Encoders (may reuse in v2)
     "GridEncoderLite",
+    "SimpleGridEncoder",
     "create_encoder",
+    # World Model (reference)
     "EnsembleWorldModel",
     "WorldModelOutput",
     "create_world_model",
-    "BeliefStateTracker",
-    "BeliefOutput",
-    "create_belief_tracker",
+    # Policy (reference)
     "FastPolicy",
     "FastPolicyOutput",
     "create_fast_policy",
-    "SlowPolicy",
-    "SlowPolicyOutput",
-    "create_slow_policy",
-    "Arbiter",
-    "ArbiterDecision",
-    "create_arbiter",
-    "LLMInterface",
-    "LLMResponse",
-    "create_llm_interface",
-    "ARIALiteAgent",
-    "AgentOutput",
-    "create_agent",
-    # ARC-AGI-3 integration
-    "ARCAGIAgent",
-    "ARCAgentConfig",
-    "create_arc_agent",
+    # Demo utilities (reusable)
+    "DemoDataset",
+    "GameDemo",
 ]
