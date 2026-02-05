@@ -75,7 +75,12 @@ src/arc_neurosymbolic_v2/  # DSL, reasoning (reference)
 
 ## Git Commits
 
-**IMPORTANT:** Never mention Claude or add Claude as co-author in commits. Keep commit messages focused on the changes made.
+**IMPORTANT:**
+- All commits must be authored by AshisGhosh only
+- Never mention Claude, add co-authors, or use any other author identity
+- Never modify git config user.name or user.email
+- When using git-manager agent, ensure SSH key is for AshisGhosh (not AshisBotCo or others)
+- Keep commit messages focused on the changes made
 
 ## Commands
 
