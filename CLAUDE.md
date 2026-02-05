@@ -73,6 +73,10 @@ src/arc_neurosymbolic_v2/  # DSL, reasoning (reference)
 | World model error (5-step) | <30% |
 | Training VRAM | <7GB |
 
+## Git Commits
+
+**IMPORTANT:** Never mention Claude or add Claude as co-author in commits. Keep commit messages focused on the changes made.
+
 ## Commands
 
 ```bash

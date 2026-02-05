@@ -76,3 +76,6 @@ environment_files/
 
 # Collected demos (regenerable)
 demos/
+
+# Downloaded videos (large files)
+videos/

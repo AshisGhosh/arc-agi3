@@ -6,11 +6,12 @@
 **Status:** 🟢 On Track
 
 ## Immediate Next Step
-Download human gameplay videos and run video_demo_extractor.py to extract successful trajectories.
+Fix mode collapse in meta-learning model - currently predicts most common action (UP=74.5%) regardless of input.
 
 ## Recent Completions
-- [2026-02-04] **Video demo extractor**: OCR-based extraction from gameplay videos (video_demo_extractor.py)
-- [2026-02-04] **Few-shot training pipeline**: Demo collector + train_arc_fewshot.py (100% train accuracy)
+- [2026-02-04] **Human demos loaded**: 28 demos (27 successful) from JSONL recordings via `jsonl_demo_loader.py`
+- [2026-02-04] **Mode collapse identified**: Model learns action distribution, not game logic (needs architecture fix)
+- [2026-02-04] **Few-shot training pipeline**: Demo collector + train_arc_fewshot.py (92.9% train accuracy)
 - [2026-02-04] **Demo collection**: 110 demos across 3 games (ls20, vc33, ft09)
 - [2026-02-04] **ARC-AGI-3 integration complete**: Created adapter (`arc_agent.py`) and validation script
 - [2026-02-04] **Zero-shot baseline**: 0/3 games (ls20, vc33, ft09) - establishes baseline for improvement
@@ -45,13 +46,14 @@ Download human gameplay videos and run video_demo_extractor.py to extract succes
 
 ## Next Steps
 - [x] Collect demonstrations from game exploration (110 demos collected)
-- [x] Fine-tune meta-learning model on game-specific demos (100% train accuracy)
-- [x] Test few-shot adaptation (K=3 demos) - 0% success (needs better demos)
-- [x] Created video_demo_extractor.py for OCR-based extraction from gameplay videos
-- [ ] Download human gameplay videos from Google Drive
-- [ ] Run video_demo_extractor.py to extract successful human demonstrations
-- [ ] Retrain meta-learning model with human demos
-- [ ] Evaluate few-shot performance with quality demos
+- [x] Fine-tune meta-learning model on game-specific demos (92.9% train accuracy)
+- [x] Test few-shot adaptation (K=3 demos) - 0% success (mode collapse)
+- [x] Load human demos from JSONL recordings (28 demos, 27 successful)
+- [x] Retrain meta-learning model with human demos
+- [ ] **Fix mode collapse**: Model predicts action 1 (UP) regardless of state
+- [ ] Option A: Behavioral cloning with observation-conditioned policy
+- [ ] Option B: Use game-specific expert policies (A* for navigation)
+- [ ] Option C: Train with RL to discover solutions
 
 ## Links
 - [Progress Guide](PROGRESS-GUIDE.md) - Format instructions for all trackers
