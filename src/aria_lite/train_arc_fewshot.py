@@ -71,8 +71,8 @@ def prepare_training_data(
                     size=(grid_size, grid_size),
                     mode="nearest",
                 )
-                # Quantize to color indices (0-15)
-                obs_quant = (obs_small / 256 * 16).long().clamp(0, 15)
+                # Values are already color indices (0-15), just convert to long
+                obs_quant = obs_small.long().clamp(0, 15)
                 obs_list.append(obs_quant.squeeze())
 
             actions = demo.actions[:max_steps]

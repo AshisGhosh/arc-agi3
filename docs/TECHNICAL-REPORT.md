@@ -174,12 +174,21 @@ A 29M parameter dual-system architecture:
 | EXP-011c | Loop detection | 220+/300 loops | BC creates loops immediately |
 | EXP-011d | Exploration (30%) | 0 levels | Random exploration insufficient |
 
+### Phase 5: World Model Training (2026-02-05)
+
+| ID | Goal | Result | Key Learning |
+|----|------|--------|--------------|
+| EXP-012a | World model training | state_loss=0.033 | Learns dynamics from demo transitions |
+| EXP-012b | Uncertainty estimation | mean=0.15 | Ensemble disagreement works |
+| EXP-012c | WM-guided deliberation | 0 levels, 286 loops | Dynamics ≠ reward direction |
+| EXP-012d | Curiosity bonus | 0 levels | Novel states ≠ goal states |
+
 **Key Learning:**
-- Simple encoder achieves same accuracy as standalone BC (79%)
-- Loop detection confirms policy gets stuck in 75% of steps
-- Confidence is ~50% low - arbiter correctly triggers slow policy need
-- But no trained slow policy exists yet to help when fast policy uncertain
-- Need goal-directed exploration (A* expert) instead of random exploration
+- World model learns dynamics well (low prediction error)
+- Ensemble uncertainty estimation works (0.15 average)
+- But knowing dynamics isn't enough without reward signal
+- Game only provides sparse `levels_completed` reward
+- Need RL to discover what actions lead to level completion
 
 ---
 

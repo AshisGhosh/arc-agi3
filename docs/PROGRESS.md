@@ -8,22 +8,31 @@
 ## Immediate Next Step
 Implement A* expert for ls20 to generate goal-directed demonstrations that understand game mechanics.
 
-## Latest Findings (EXP-011: ARIA Architecture Integration)
-**Integrated BC training with full ARIA architecture (encoder + fast policy):**
-1. Full ARIA encoder (8.5M params) with 64x64 inputs: 31% accuracy - too large for 5905 samples
-2. Simple encoder (0.6M params) with 16x16 inputs: 79% accuracy - matches standalone BC
-3. Loop detection reveals **220+ loops per 300 steps** - policy gets stuck immediately
-4. Confidence now ~50% low (vs 100% before) - arbiter would trigger slow policy
-5. Random exploration (30% epsilon + loop breaking) still gets 0 levels
+## Latest Findings (EXP-012: Full ARIA Integration)
+**Integrated all ARIA components:**
+1. **BC Fast Policy**: 79% train accuracy, but loops during evaluation
+2. **World Model**: Trained on 5893 transitions, state_loss=0.033, uncertainty=0.15
+3. **Slow Policy Deliberation**: Uses world model to evaluate actions, adds curiosity bonus
+4. **Result**: Still 0 levels - 286 loops per episode
 
-**Key insight:** The dual-system architecture is working correctly - fast policy is uncertain and would trigger slow policy. But we don't have a trained slow policy yet!
+**Architecture working correctly:**
+- Fast policy trains well (79% accuracy)
+- World model learns dynamics (low prediction error)
+- Arbiter triggers slow policy (100% slow due to low confidence)
+- Slow policy uses world model for action evaluation
 
-**Root cause:** BC learns state→action mapping without understanding goals. The agent navigates in loops because it doesn't know "where to go" (key positions, lock positions).
+**Root cause identified:**
+- **Sparse reward**: Game only gives `levels_completed` signal
+- **No goal direction**: World model predicts dynamics but not what leads to reward
+- **BC limitation**: Imitates trajectories but doesn't understand goals
+- **Curiosity insufficient**: Exploring novel states ≠ reaching goals
+
+**Conclusion:** Need RL to discover what leads to reward through interaction.
 
 **Next steps:**
-1. Implement A* expert to generate goal-directed trajectories (knows where keys/locks are)
-2. Use A* demonstrations to understand game mechanics
-3. Train slow policy to plan toward goals when fast policy is uncertain
+1. Implement PPO training with sparse reward from level completion
+2. Use world model for imagination/planning during RL
+3. Add reward shaping if needed (e.g., intermediate progress signals)
 
 ## Recent Completions
 - [2026-02-04] **Human demos loaded**: 28 demos (27 successful) from JSONL recordings via `jsonl_demo_loader.py`
