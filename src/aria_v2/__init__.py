@@ -12,7 +12,7 @@ Architecture:
                         ↓
                Subgoal Executor → Navigate to next diamond
 
-See docs/ARIA-V2-ARCHITECTURE.md for full specification.
+See docs/current/ARCHITECTURE.md for full specification.
 """
 
 __version__ = "0.1.0"

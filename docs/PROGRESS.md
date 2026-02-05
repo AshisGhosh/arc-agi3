@@ -1,12 +1,24 @@
 # Project Progress
 
 ## Current State
-**Phase:** ARIA v2 - Language-Guided Meta-Learning Architecture
+**Phase:** ARIA v2 - Phase 1: Visual Grounding
 **Branch:** main
-**Status:** 🟢 New Direction - Shifting to language-based reasoning
+**Status:** 🟢 Ready to implement
 
 ## Immediate Next Step
-Implement ARIA v2 architecture: Visual Grounding → Event Detection → LLM Reasoning → Subgoal Execution
+**Phase 1.1:** Create synthetic game generator (`src/aria_v2/pretraining/synthetic_games.py`)
+- Generate procedural games with labeled entities (player, goal, item, obstacle, trigger)
+- Target: 10k labeled game states for training entity detector
+
+## Code Status
+| Component | File | Status |
+|-----------|------|--------|
+| Configuration | `src/aria_v2/config.py` | ✅ Done |
+| Visual Grounding | `src/aria_v2/visual_grounding.py` | ⚪ Not started |
+| Event Detector | `src/aria_v2/event_detector.py` | ⚪ Not started |
+| LLM Reasoning | `src/aria_v2/llm_reasoning.py` | ⚪ Not started |
+| Subgoal Executor | `src/aria_v2/subgoal_executor.py` | ⚪ Not started |
+| Integrated Agent | `src/aria_v2/agent.py` | ⚪ Not started |
 
 ## Architecture Shift: ARIA v1 → ARIA v2
 
@@ -61,7 +73,9 @@ See [ARIA v2 Architecture](current/ARCHITECTURE.md) for full details.
 - BC learns imitation but not goal understanding
 
 ## Recent Completions
-- [2026-02-05] **ARIA v2 Architecture**: Designed language-guided meta-learning system (see ARIA-V2-ARCHITECTURE.md)
+- [2026-02-05] **Docs reorganized**: Structured into current/, reference/, findings/, archive/
+- [2026-02-05] **ARIA v2 config**: Created `src/aria_v2/config.py` with component configurations
+- [2026-02-05] **ARIA v2 Architecture**: Designed language-guided meta-learning system
 - [2026-02-05] **Architecture decision**: Shift from end-to-end neural to language-based reasoning
 - [2026-02-05] **PPO training implemented**: train_ppo_arc.py with reward shaping, achieved 0.18% success rate
 - [2026-02-05] **ls20 game analysis**: Identified as puzzle game requiring state matching (not just navigation)
@@ -83,24 +97,14 @@ See [ARIA v2 Architecture](current/ARCHITECTURE.md) for full details.
 ## Archived Branches (ARIA v1)
 | Branch | Status | Progress | Link |
 |--------|--------|----------|------|
-| primitives-pretraining | ✅ Complete | 5/5 | [details](archive/progress/primitives-pretraining.md) |
-| arc-agi3-exploration | ✅ Complete | 3/3 | [details](archive/progress/arc-agi3-exploration.md) |
-| training-validation | ✅ Complete | 9/9 experiments | [details](archive/progress/training-validation.md) |
-
-## Architecture Summary
-| Component | Params | Status |
-|-----------|--------|--------|
-| GridEncoderLite | 8.3M | 🟢 Validated |
-| WorldModelLite | 7.9M | 🟢 Built |
-| BeliefState | 0.8M | 🟢 Built |
-| FastPolicy | 0.4M | 🟢 Validated |
-| SlowPolicy | 8.5M | 🟢 Built |
-| **Total** | **25.9M** | Target: 29M |
+| primitives-pretraining | ✅ Complete | 5/5 | [details](archive/v1-progress/primitives-pretraining.md) |
+| arc-agi3-exploration | ✅ Complete | 3/3 | [details](archive/v1-progress/arc-agi3-exploration.md) |
+| training-validation | ✅ Complete | 9/9 experiments | [details](archive/v1-progress/training-validation.md) |
 
 ## Key Decisions Made
-- [x] **Primitive scope:** Navigation, Click, Pattern, Memory, Counter, Compositions (all validated)
-- [x] **Meta-learning approach:** Context-conditioned with FiLM (Nav 76%, Click 100%)
+- [x] **Architecture shift:** ARIA v1 → v2 (end-to-end neural → language-guided reasoning)
 - [x] **Evaluation strategy:** Using 3 local games (ls20, vc33, ft09) for offline testing
+- [x] **LLM choice:** TinyLlama 1.1B (small enough to fit in VRAM alongside vision)
 
 ## Next Steps - ARIA v2 Implementation
 
