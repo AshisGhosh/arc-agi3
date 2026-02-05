@@ -6,7 +6,18 @@
 **Status:** 🟢 On Track
 
 ## Immediate Next Step
-Fix mode collapse in meta-learning model - currently predicts most common action (UP=74.5%) regardless of input.
+Implement A* expert for ls20 to understand game mechanics and generate perfect demonstrations.
+
+## Latest Findings (EXP-010)
+**Simple BC on human demos fails despite multiple fixes:**
+1. Fixed observation quantization (values 0-15, not 0-255) - accuracy 38%→62%
+2. Fixed grid size (16x16 preserves agent marker) - accuracy 62%→73%
+3. Used full trajectories (500 steps) - accuracy 73%→80%, 5905 samples
+4. Still 0 levels completed even with 30% exploration
+
+**Root cause:** BC learns state→action mapping but creates loops. Model needs temporal context or game understanding that pure imitation doesn't provide.
+
+**Next:** Option B - A* expert to understand what makes a valid solution.
 
 ## Recent Completions
 - [2026-02-04] **Human demos loaded**: 28 demos (27 successful) from JSONL recordings via `jsonl_demo_loader.py`
