@@ -80,12 +80,12 @@ See [ARIA v2 Architecture](ARIA-V2-ARCHITECTURE.md) for full details.
 - [2026-02-04] Fixed memory with explicit memory storage
 - [2026-02-04] Implemented `src/aria_lite/primitives/` with 5 primitive families
 
-## Active Branches
+## Archived Branches (ARIA v1)
 | Branch | Status | Progress | Link |
 |--------|--------|----------|------|
-| primitives-pretraining | ✅ Complete | 5/5 | [details](progress/primitives-pretraining.md) |
-| arc-agi3-exploration | ✅ Complete | 3/3 | [details](progress/arc-agi3-exploration.md) |
-| training-validation | ✅ Complete | 9/9 experiments | [details](progress/training-validation.md) |
+| primitives-pretraining | ✅ Complete | 5/5 | [details](archive/progress/primitives-pretraining.md) |
+| arc-agi3-exploration | ✅ Complete | 3/3 | [details](archive/progress/arc-agi3-exploration.md) |
+| training-validation | ✅ Complete | 9/9 experiments | [details](archive/progress/training-validation.md) |
 
 ## Architecture Summary
 | Component | Params | Status |
@@ -144,7 +144,8 @@ See [ARIA v2 Architecture](ARIA-V2-ARCHITECTURE.md) for full details.
 
 ## Links
 - [**ARIA v2 Architecture**](ARIA-V2-ARCHITECTURE.md) - Language-guided meta-learning (CURRENT)
+- [ARIA v2 Implementation Plan](ARIA-V2-IMPLEMENTATION-PLAN.md) - 5-phase build plan
 - [Technical Report](TECHNICAL-REPORT.md) - Comprehensive decisions, experiments, and learnings
-- [Progress Guide](PROGRESS-GUIDE.md) - Format instructions for all trackers
 - [ARC-AGI-3 Mechanics](ARC-AGI3-MECHANICS.md) - Game analysis
-- [ARIA-Lite Implementation](ARIA-LITE-IMPLEMENTATION.md) - Original architecture (deprecated)
+- [ARIA v1 Results](../experiments/aria_v1/results/summary.md) - Archived experiment outcomes
+- [ARIA-Lite Implementation](archive/ARIA-LITE-IMPLEMENTATION.md) - Original architecture (archived)
