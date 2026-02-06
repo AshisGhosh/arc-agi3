@@ -13,6 +13,27 @@ If documentation is inconsistent or outdated, **fix it first** before proceeding
 
 ---
 
+## Project Context
+
+ARC-AGI-3 competition project. The agent learns game dynamics from human demonstrations via a learned world model.
+
+**Current approach:** VQ-VAE + SmolLM2-360M + LoRA
+```
+Frame (64x64, 16 colors)
+  → VQ-VAE encoder → 64 discrete tokens (512-code codebook)
+  → SmolLM2-360M (LoRA) → next-token prediction
+  → Surprise + Goal inference (P(LEVEL_COMPLETE)) + Learned policy
+```
+
+**Status:** Training complete (88.4% frame acc, 67.9% action acc, 1.8 ppl). Next: agent evaluation.
+
+**Previous approaches (superseded):**
+- ARIA v1: BC (80% acc, 0% levels) and PPO (0.18% success) - failed
+- Language-guided meta-learning: visual grounding + LLM reasoning - too brittle
+- Heuristic abstract learning: rule templates - won't generalize
+
+---
+
 ## Documentation-First Protocol
 
 ### Before Starting Any Task
@@ -33,13 +54,6 @@ If documentation is inconsistent or outdated, **fix it first** before proceeding
    - If inconsistent, document or remove orphaned work
 ```
 
-### During Work
-
-- Document experiments as you run them (EXP-XXX format)
-- Document decisions as you make them (DEC-XXX format)
-- If you create a file, it must be referenced in docs
-- If you abandon an approach, move to archive/
-
 ### After Completing Work
 
 ```
@@ -57,24 +71,37 @@ If documentation is inconsistent or outdated, **fix it first** before proceeding
 
 ---
 
-## Project Context
+## Code Location
 
-ARC-AGI-3 competition project implementing ARIA v2 (language-guided meta-learning).
-
-**Why v2?** ARIA v1 (end-to-end neural) failed:
-- BC: 80% accuracy, 0% level completion (mode collapse)
-- PPO: 0.18% success rate (sparse reward too hard)
-- Root cause: Need to understand game rules, not just mimic actions
-
-**ARIA v2 Architecture:**
 ```
-Observation → Visual Grounding → Language Description
-                    ↓
-           Event Detection → "Player touched diamond, score +1"
-                    ↓
-           LLM Reasoning → "Diamonds are collectibles"
-                    ↓
-           Subgoal Executor → Navigate to next diamond
+src/aria_v2/
+├── tokenizer/                  # VQ-VAE frame tokenization
+│   ├── frame_tokenizer.py      #   VQ-VAE model (99.85% acc)
+│   ├── train_vqvae.py          #   VQ-VAE training script
+│   └── trajectory_dataset.py   #   JSONL → tokenized sequences (876K tokens)
+│
+├── world_model/                # SmolLM2 + LoRA world model
+│   ├── config.py               #   All config dataclasses
+│   ├── game_transformer.py     #   Model creation (bfloat16, LoRA)
+│   ├── train.py                #   Training pipeline (88.4% frame acc)
+│   └── agent.py                #   Inference agent (surprise + goal + policy)
+│
+├── core/                       # Earlier heuristic approach
+│   ├── abstract_learner.py     #   Rule learning from observations
+│   ├── goal_induction.py       #   Hypothesis testing
+│   ├── demonstration_learner.py#   JSONL demo analysis
+│   └── agent.py                #   Heuristic agent loop
+│
+├── pretraining/                # Synthetic training data
+│   └── synthetic_games.py
+│
+├── config.py                   # Old v2 config
+├── visual_grounding.py         # Entity detection (100% acc)
+└── run_game.py                 # Game runner (arcengine)
+
+checkpoints/
+├── vqvae/best.pt               # VQ-VAE checkpoint (~2MB)
+└── world_model/best.pt         # SmolLM2 checkpoint (704MB)
 ```
 
 ---
@@ -84,132 +111,67 @@ Observation → Visual Grounding → Language Description
 ```
 docs/
 ├── PROGRESS.md              # Current state (READ FIRST)
-│
-├── current/                 # Active development
-│   ├── ARCHITECTURE.md      # ARIA v2 architecture spec
-│   └── IMPLEMENTATION-PLAN.md  # 5-phase build plan
-│
+├── current/
+│   ├── ARCHITECTURE.md      # VQ-VAE + SmolLM2 architecture
+│   └── IMPLEMENTATION-PLAN.md  # What's built + next steps
 ├── reference/               # Competition docs
-│   ├── ARC-AGI-3-OVERVIEW.md
-│   ├── API-GUIDE.md
-│   ├── BUILDING-AGENTS.md
-│   └── GAME-MECHANICS.md
-│
+│   └── GAME-MECHANICS.md    # ls20, vc33, ft09 analysis
 ├── findings/                # What we learned
-│   └── ARIA-V1-REPORT.md    # v1 experiments & lessons
-│
-└── archive/                 # Abandoned/superseded
-    ├── architectures/       # Old architecture designs
-    ├── v1-progress/         # Old progress tracking
-    └── internal/            # Process docs
-```
-
-### What Goes Where
-
-| Content | Location |
-|---------|----------|
-| Current project state | `docs/PROGRESS.md` |
-| Architecture spec | `docs/current/ARCHITECTURE.md` |
-| Implementation tasks | `docs/current/IMPLEMENTATION-PLAN.md` |
-| New findings/learnings | `docs/findings/` |
-| Abandoned approaches | `docs/archive/` |
-| Competition reference | `docs/reference/` |
-
----
-
-## Code Location
-
-```
-src/aria_v2/            # ARIA v2 (CURRENT DEVELOPMENT)
-├── config.py           # Configuration
-├── visual_grounding/   # Entity detection (Phase 1)
-├── event_detector/     # Change tracking (Phase 2)
-├── llm_reasoning/      # LLM integration (Phase 3)
-├── subgoal_executor/   # Navigation (Phase 4)
-└── agent.py            # Integrated agent (Phase 5)
-
-experiments/aria_v1/    # Archived v1 experiments
-src/aria_lite/          # ARIA v1 code (deprecated)
+│   └── ARIA-V1-REPORT.md   # v1 experiments & lessons
+└── archive/                 # Abandoned approaches
 ```
 
 ---
 
-## Documentation Formats
+## Critical Technical Notes
 
-### Experiments (EXP-XXX)
-
-```markdown
-### EXP-XXX: [Descriptive Name]
-- **Date:** YYYY-MM-DD
-- **Goal:** What hypothesis are we testing?
-- **Setup:** Model, data, hyperparameters
-- **Result:** Metrics (be specific)
-- **Conclusion:** What did we learn? Next action?
-```
-
-### Decisions (DEC-XXX)
-
-```markdown
-### DEC-XXX: [Decision Title]
-- **Context:** What problem required a decision?
-- **Options:** What alternatives existed?
-- **Choice:** What did we decide?
-- **Rationale:** WHY? (most important)
-- **Outcome:** What happened as a result?
-```
+- **bfloat16, not fp16**: SmolLM2 must be loaded in bfloat16. fp16 causes NaN with 49K vocab CE loss.
+- **Loss in float32**: Compute cross-entropy outside `torch.amp.autocast` block.
+- **PEFT**: embed_tokens and lm_head need manual `requires_grad=True` after applying LoRA.
+- **JSONL format**: `data.frame[0]` is the grid, `data.action_input.id` is the action.
+- **VQ-VAE EMA**: Must wrap updates in `torch.no_grad()` and detach `z_flat`.
 
 ---
 
-## Proactive Maintenance
+## Success Criteria
 
-### File Organization
-
-- **New files** must be documented in PROGRESS.md or relevant docs
-- **Orphaned files** (not referenced anywhere) should be archived or deleted
-- **Experimental code** goes in `experiments/`, not `src/`
-
-### Consistency Checks
-
-If you notice:
-- Code that isn't documented → Document it or remove it
-- Docs that don't match code → Update docs or fix code
-- Stale progress items → Update or archive them
-
-**Fix inconsistencies immediately.** Don't leave them for later.
-
----
-
-## Success Criteria (ARIA v2)
-
-| Metric | Target | Phase |
-|--------|--------|-------|
-| Entity detection accuracy | >90% | 1 |
-| Event identification | >80% | 2 |
-| Navigation success rate | >95% | 4 |
-| ARC level completion | >10% | 5 |
+| Metric | Target | Current |
+|--------|--------|---------|
+| VQ-VAE pixel accuracy | >95% | 99.85% |
+| World model frame prediction | >40% | 88.4% |
+| World model action prediction | >30% | 67.9% |
+| World model perplexity | <20 | 1.8 |
+| Agent level completion | >0 levels | Not yet tested |
+| Competition target | >10% levels | Pending |
 
 ---
 
 ## Specialized Agents
 
 Use these for designated tasks:
-- `python-ml-architect` → Code structure, ML patterns
-- `multimodal-action-architect` → Architecture decisions
-- `rl-training-expert` → Training strategy
-- `experiment-manager` → Experiment tracking
-- `arc-agi-evaluator` → Approach evaluation
+- `python-ml-architect` - Code structure, ML patterns
+- `multimodal-action-architect` - Architecture decisions
+- `rl-training-expert` - Training strategy
+- `experiment-manager` - Experiment tracking
+- `arc-agi-evaluator` - Approach evaluation
 
 ---
 
 ## Commands
 
 ```bash
-# Lint code
+# Run agent on game
+uv run python -m src.aria_v2.world_model.agent --game ls20
+
+# Train VQ-VAE
+uv run python -m src.aria_v2.tokenizer.train_vqvae
+
+# Train world model
+uv run python -m src.aria_v2.world_model.train --epochs 30
+
+# Lint
 uv run ruff check --fix src/aria_v2/
 
-# Run tests
-uv run pytest src/aria_v2/tests/
-
-# Check VRAM usage
+# VRAM check
 nvidia-smi
 ```

@@ -1,53 +1,38 @@
 """
-ARIA v2: Evidence-Based Game Understanding
+ARIA v2 Core - Evidence-based game understanding.
 
 No pre-training required. Learn during play through observation.
 
-Architecture:
-    Frame → ObservationTracker → Pixel changes, movement detection
-              ↓
-    BeliefState → Evidence counting (blockers, collectibles, goals)
-              ↓
-    ExplorationPolicy → Random (baseline) | Systematic | Learned (A/B testable)
-              ↓
-    ActionSelector → Navigate to goal/collectibles, or explore
-
-Key Design Decisions:
-1. No pre-training on synthetic data (avoids domain gap)
-2. Learn during gameplay through observation
-3. Evidence-based beliefs (counting, not LLM outputs)
-4. A/B testable exploration policies
-5. LLM is optional, not core
-
-Usage:
-    from src.aria_v2.core import ARIAAgent, AgentConfig
-
-    agent = ARIAAgent(AgentConfig(exploration_type="systematic"))
-    action = agent.act(frame)
-
-A/B Testing:
-    python -m src.aria_v2.core.run_ab_test
+Components:
+- ObservationTracker: Detect changes between frames
+- BeliefState: Track evidence about colors/positions
+- Navigation: A* pathfinding
+- Exploration: Random vs Learned policies (A/B testable)
+- ActionSelector: Combine everything into decisions
 """
 
-__version__ = "0.2.0"
-
-# Core components
-from .core import (
-    # Observation
+from .observation_tracker import (
     ObservationTracker,
     Observation,
     PixelChange,
     RegionChange,
-    # Belief
+)
+
+from .belief_state import (
     BeliefState,
     ColorBelief,
     PositionBelief,
-    # Navigation
+    TimerState,
+)
+
+from .navigation import (
     AStarNavigator,
     PathResult,
     find_nearest,
     positions_of_color,
-    # Exploration
+)
+
+from .exploration import (
     ExplorationPolicy,
     ExplorationDecision,
     ExplorationStrategy,
@@ -55,19 +40,30 @@ from .core import (
     SystematicExplorationPolicy,
     LearnedExplorationPolicy,
     ExplorationPolicyNetwork,
-    # Action Selection
+)
+
+from .action_selector import (
     ActionSelector,
     ActionDecision,
     SimpleRuleGeneralizer,
-    # Agent
+)
+
+from .agent import (
     ARIAAgent,
     AgentConfig,
     EpisodeStats,
     ABTestRunner,
-    # Training
+)
+
+from .exploration_training import (
     ExplorationTrainer,
     TrainingConfig,
     SyntheticGameSimulator,
+)
+
+from .llm_advisor import (
+    LLMAdvisor,
+    LLMAdvice,
 )
 
 __all__ = [
@@ -80,6 +76,7 @@ __all__ = [
     "BeliefState",
     "ColorBelief",
     "PositionBelief",
+    "TimerState",
     # Navigation
     "AStarNavigator",
     "PathResult",
@@ -106,4 +103,7 @@ __all__ = [
     "ExplorationTrainer",
     "TrainingConfig",
     "SyntheticGameSimulator",
+    # LLM
+    "LLMAdvisor",
+    "LLMAdvice",
 ]

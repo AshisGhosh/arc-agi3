@@ -1,168 +1,116 @@
 # Project Progress
 
 ## Current State
-**Phase:** ARIA v2 - Phase 1: Visual Grounding
+**Phase:** Learned World Model (VQ-VAE + SmolLM2-360M + LoRA)
 **Branch:** main
-**Status:** 🟢 Ready to implement
+**Status:** Training complete, ready for agent evaluation
 
 ## Immediate Next Step
-**Phase 2:** Implement Event Detection (`src/aria_v2/event_detector.py`)
-- Track state changes between frames
-- Identify meaningful events (collection, collision, trigger)
+**Run world model agent on real games and evaluate:**
+- Run `uv run python -m src.aria_v2.world_model.agent --game ls20`
+- Measure level completion rate vs heuristic baseline (0 levels) and human demos (11/12)
+- Evaluate surprise-based exploration and goal inference behavior
+- Profile inference speed (target: <100ms per action)
 
-## Latest Training Results
+---
+
+## Architecture
+
+```
+Frame (64x64, 16 colors)
+  → VQ-VAE encoder → 64 discrete tokens (8x8 grid, 512-code codebook)
+  → SmolLM2-360M (LoRA) → next-token prediction
+  → World model (surprise) + Goal inference (P(LEVEL_COMPLETE)) + Action selection
+```
+
+**Why this approach:** Prediction error replaces all heuristics. "Background" = what the model predicts correctly. "Level transition" = what the model fails to predict. "Goal" = what precedes LEVEL_COMPLETE tokens.
+
+See [Architecture Details](current/ARCHITECTURE.md).
+
+---
+
+## Training Results
+
 | Metric | Target | Achieved | Status |
 |--------|--------|----------|--------|
-| Entity Detection F1 | >95% | **100%** | ✅ |
-| Entity Classification | >85% | **100%** | ✅ |
+| VQ-VAE pixel accuracy | >95% | **99.85%** | Exceeded |
+| VQ-VAE codebook utilization | >50% | **44.73%** | Close |
+| World model frame prediction | >40% | **88.4%** | 2.2x target |
+| World model action prediction | >30% | **67.9%** | 2.3x target |
+| World model perplexity | <20 | **1.8** | 11x target |
+| Level completion prediction | N/A | **99.5%** | Excellent |
+| Best validation loss | N/A | **0.5721** | Converged |
+| Total training time | N/A | **79 min** | VQ-VAE 1.9min + WM 77min |
+
+---
 
 ## Code Status
+
+### Active Components (Learned World Model)
 | Component | File | Status |
 |-----------|------|--------|
-| Configuration | `src/aria_v2/config.py` | ✅ Done |
-| Synthetic Games | `src/aria_v2/pretraining/synthetic_games.py` | ✅ Done |
-| Visual Grounding | `src/aria_v2/visual_grounding.py` | ✅ Done |
-| VG Trainer V1 | `src/aria_v2/pretraining/visual_grounding_trainer.py` | ✅ Done |
-| VG Trainer V2 | `src/aria_v2/pretraining/visual_grounding_trainer_v2.py` | ✅ Done (100% accuracy) |
-| Event Detector | `src/aria_v2/event_detector.py` | ⚪ Not started |
-| LLM Reasoning | `src/aria_v2/llm_reasoning.py` | ⚪ Not started |
-| Subgoal Executor | `src/aria_v2/subgoal_executor.py` | ⚪ Not started |
-| Integrated Agent | `src/aria_v2/agent.py` | ⚪ Not started |
+| VQ-VAE Frame Tokenizer | `src/aria_v2/tokenizer/frame_tokenizer.py` | Done (99.85% acc) |
+| VQ-VAE Training | `src/aria_v2/tokenizer/train_vqvae.py` | Done |
+| Trajectory Dataset | `src/aria_v2/tokenizer/trajectory_dataset.py` | Done (876K tokens, 28 trajectories) |
+| World Model Config | `src/aria_v2/world_model/config.py` | Done |
+| SmolLM2 + LoRA | `src/aria_v2/world_model/game_transformer.py` | Done |
+| Training Pipeline | `src/aria_v2/world_model/train.py` | Done |
+| Inference Agent | `src/aria_v2/world_model/agent.py` | Done |
 
-## Architecture Shift: ARIA v1 → ARIA v2
+### Earlier Components (Exploratory, not on critical path)
+| Component | File | Notes |
+|-----------|------|-------|
+| Visual Grounding | `src/aria_v2/visual_grounding.py` | 100% accuracy on synthetic games |
+| Synthetic Games | `src/aria_v2/pretraining/synthetic_games.py` | Training data generator |
+| Abstract Learner | `src/aria_v2/core/abstract_learner.py` | Heuristic rule learning |
+| Goal Induction | `src/aria_v2/core/goal_induction.py` | Hypothesis testing |
+| Demonstration Learner | `src/aria_v2/core/demonstration_learner.py` | JSONL demo analysis |
+| Heuristic Agent | `src/aria_v2/core/agent.py` | Older agent loop |
+| Run Game | `src/aria_v2/run_game.py` | Game runner (arcengine) |
 
-**Why the change:**
-- ARIA v1 (end-to-end neural) couldn't learn ls20 puzzle mechanics
-- BC achieves 80% accuracy but 0% level completion (wrong policy)
-- PPO with sparse reward couldn't discover goals (0.18% success)
-- Need meta-learning that understands game rules, not just mimics actions
+### Checkpoints
+| Checkpoint | Path | Size |
+|------------|------|------|
+| VQ-VAE | `checkpoints/vqvae/best.pt` | ~2MB |
+| World Model | `checkpoints/world_model/best.pt` | 704MB |
+| Trajectory Cache | `checkpoints/world_model/cache/trajectories.pt` | ~3.5MB |
 
-**ARIA v2 Core Insight:**
-> "Understand games in language, then act"
-
-**New Architecture:**
-```
-Observation → Visual Grounding → Language Description
-                    ↓
-           Event Detection → "Player touched diamond, score +1"
-                    ↓
-           LLM Reasoning → "Diamonds are collectibles, goal is collect all"
-                    ↓
-           Subgoal Executor → Navigate to next diamond
-```
-
-See [ARIA v2 Architecture](current/ARCHITECTURE.md) for full details.
-
-## Latest Findings (EXP-013: PPO Training)
-**Implemented PPO training on ARC-AGI-3:**
-1. **PPO v1**: 3/1712 episodes reached levels (0.18% success rate)
-2. **PPO v2 (improved rewards)**: First test showed 10/500 success, but full run: 0/1700+ episodes
-3. **BC with class weights**: Backfired - NOOP dominated (49.6%), worse than before
-
-**Key discoveries about ls20:**
-- ls20 is a PUZZLE game, not just navigation
-- Requires: navigate to target + match state (sprite/color/rotation)
-- Human demos: balanced actions (UP 31%, DOWN 28%, LEFT 20%, RIGHT 21%)
-- Human average: 400-850 steps to complete all 7 levels
-- All 12 human demos successful (11 won, 1 got 6 levels)
-
-**What we tried:**
-| Approach | Result | Issue |
-|----------|--------|-------|
-| BC (79% acc) | 0 levels | Mode collapse, loops |
-| World Model | state_loss=0.033 | Learns dynamics, not goals |
-| PPO v1 | 0.18% success | Sparse reward too hard |
-| PPO v2 (stronger rewards) | 0% | High variance, no learning |
-| BC + class weights | 0% | NOOP dominated |
-| BC + random exploration | 0% | Ineffective |
-
-**Root cause confirmed:**
-- ls20 requires understanding game mechanics (state matching)
-- Random/RL exploration insufficient for puzzle games
-- BC learns imitation but not goal understanding
+---
 
 ## Recent Completions
-- [2026-02-05] **Phase 1 complete**: Visual grounding with 100% detection + 100% classification
-- [2026-02-05] **Classification V2**: Entity-level classifier with distinct patterns, focal loss
-- [2026-02-05] **Phase 1.1 complete**: Synthetic game generator with labeled entities (player, goal, item, obstacle, trigger)
-- [2026-02-05] **Docs reorganized**: Structured into current/, reference/, findings/, archive/
-- [2026-02-05] **ARIA v2 config**: Created `src/aria_v2/config.py` with component configurations
-- [2026-02-05] **ARIA v2 Architecture**: Designed language-guided meta-learning system
-- [2026-02-05] **Architecture decision**: Shift from end-to-end neural to language-based reasoning
-- [2026-02-05] **PPO training implemented**: train_ppo_arc.py with reward shaping, achieved 0.18% success rate
-- [2026-02-05] **ls20 game analysis**: Identified as puzzle game requiring state matching (not just navigation)
-- [2026-02-05] **Human demo analysis**: 12 demos, all successful, balanced action distribution
-- [2026-02-05] **BC class weighting**: Attempted inverse frequency weighting, backfired (NOOP dominated)
-- [2026-02-04] **Human demos loaded**: 28 demos (27 successful) from JSONL recordings via `jsonl_demo_loader.py`
-- [2026-02-04] **Mode collapse identified**: Model learns action distribution, not game logic (needs architecture fix)
-- [2026-02-04] **Few-shot training pipeline**: Demo collector + train_arc_fewshot.py (92.9% train accuracy)
-- [2026-02-04] **Demo collection**: 110 demos across 3 games (ls20, vc33, ft09)
-- [2026-02-04] **ARC-AGI-3 integration complete**: Created adapter (`arc_agent.py`) and validation script
-- [2026-02-04] **Zero-shot baseline**: 0/3 games (ls20, vc33, ft09) - establishes baseline for improvement
-- [2026-02-04] Installed `arcengine` package for local game execution
-- [2026-02-04] Meta-learning validated: Nav 76%, Click 100% (few-shot generalization)
-- [2026-02-04] All primitives validated: Nav 100%, Click 100%, Pattern 100%, Memory 100%, Counter 100%, Compositions 83-100%
-- [2026-02-04] Fixed pattern matching with convolutional approach
-- [2026-02-04] Fixed memory with explicit memory storage
-- [2026-02-04] Implemented `src/aria_lite/primitives/` with 5 primitive families
 
-## Archived Branches (ARIA v1)
-| Branch | Status | Progress | Link |
-|--------|--------|----------|------|
-| primitives-pretraining | ✅ Complete | 5/5 | [details](archive/v1-progress/primitives-pretraining.md) |
-| arc-agi3-exploration | ✅ Complete | 3/3 | [details](archive/v1-progress/arc-agi3-exploration.md) |
-| training-validation | ✅ Complete | 9/9 experiments | [details](archive/v1-progress/training-validation.md) |
+- **[2026-02-06] World Model Training**: SmolLM2-360M + LoRA trained 30 epochs in 77min. Frame acc 88.4%, action acc 67.9%, level pred 99.5%, perplexity 1.8. Fixed NaN loss by switching fp16 to bfloat16.
+- **[2026-02-06] VQ-VAE + Trajectory Pipeline**: 99.85% pixel accuracy, 876K tokens from 28 demos across 3 games (ls20, vc33, ft09). VQ-VAE trained in 1.9min.
+- **[2026-02-05] Heuristic Approach**: Abstract learning, goal induction, demonstration learning all working on ls20. Color 9 = goal (95% confidence). But brittle and won't generalize.
+- **[2026-02-05] Visual Grounding**: 100% detection + classification on synthetic games.
+- **[2026-02-04] ARIA v1**: BC (80% acc, 0% levels), PPO (0.18% success). Confirmed: puzzle games need understanding, not imitation.
+- **[2026-02-04] Human Demo Analysis**: 28 demos loaded, 12 for ls20 (11 won). Block-sliding puzzle requiring 29+ actions per level.
 
-## Key Decisions Made
-- [x] **Architecture shift:** ARIA v1 → v2 (end-to-end neural → language-guided reasoning)
-- [x] **Evaluation strategy:** Using 3 local games (ls20, vc33, ft09) for offline testing
-- [x] **LLM choice:** TinyLlama 1.1B (small enough to fit in VRAM alongside vision)
+---
 
-## Next Steps - ARIA v2 Implementation
+## Key Decisions
 
-### Phase 1: Visual Grounding (Pretraining) ✅ COMPLETE
-- [x] Create synthetic game generator with labeled entities
-- [x] Implement VisualGroundingModule (entity detection + classification)
-- [x] Train entity detector - **100% detection F1**
-- [x] Train entity classifier V2 - **100% classification accuracy**
-- [x] Implement movement correlator (what moves when action taken)
-- [x] Validate: >90% entity detection accuracy - **EXCEEDED (100%)**
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Architecture shift v1 → v2 | VQ-VAE + transformer | BC/PPO failed (0% levels); need game understanding |
+| Base model | SmolLM2-360M | Fits in 24GB VRAM with LoRA, good token prediction |
+| Precision | bfloat16 | fp16 causes NaN with 49K vocab CE loss; bf16 has better range |
+| LoRA rank | 16 on Q,K,V,O | 51M trainable params, sufficient for our data scale |
+| Loss outside autocast | float32 CE | Prevents overflow in large-vocab softmax |
 
-### Phase 2: Event Detection
-- [ ] Implement EventDetector (track state changes)
-- [ ] Build cause-effect relationship detector
-- [ ] Test on human demo recordings
-- [ ] Validate: correctly identifies item collection, level completion
+---
 
-### Phase 3: LLM Reasoning
-- [ ] Download Llama 3.2 1B (GGUF quantized)
-- [ ] Implement LLMReasoningEngine
-- [ ] Create prompts for: event interpretation, goal hypothesis, subgoal generation
-- [ ] Add response caching for efficiency
-- [ ] Validate: reasonable hypotheses on synthetic games
+## What's Next
 
-### Phase 4: Subgoal Executor
-- [ ] Implement PretrainedNavigationPolicy (A* based)
-- [ ] Train on synthetic navigation tasks
-- [ ] Add obstacle avoidance
-- [ ] Validate: >95% navigation success rate
+1. **Agent Evaluation** - Run world model agent on ls20, measure levels completed
+2. **Multi-game Testing** - Test on vc33 and ft09
+3. **Iterate** - If agent struggles, consider: more training data, longer context, reward shaping
+4. **Competition** - Submit to ARC-AGI-3 evaluation
 
-### Phase 5: Integration
-- [ ] Implement ARIAv2Agent (full pipeline)
-- [ ] Test on ls20 with language trace logging
-- [ ] Evaluate rule discovery rate
-- [ ] Target: >10% level completion on ARC-AGI-3
-
-## Completed (ARIA v1)
-- [x] BC training - 80% accuracy, 0% eval
-- [x] PPO training - 0.18% success
-- [x] World model - learns dynamics
-- [x] Human demo analysis - all 12 successful
+---
 
 ## Links
-- [**ARIA v2 Architecture**](current/ARCHITECTURE.md) - Language-guided meta-learning (CURRENT)
-- [ARIA v2 Implementation Plan](current/IMPLEMENTATION-PLAN.md) - 5-phase build plan
-- [ARIA v1 Technical Report](findings/ARIA-V1-REPORT.md) - Decisions, experiments, learnings
-- [Game Mechanics Analysis](reference/GAME-MECHANICS.md) - ls20, vc33, ft09 analysis
-- [ARIA v1 Experiment Results](../experiments/aria_v1/results/summary.md) - Metrics and outcomes
-- [Archived Architectures](archive/architectures/) - v1 approaches (deprecated)
+- [Architecture](current/ARCHITECTURE.md) - VQ-VAE + SmolLM2 learned world model
+- [Implementation Plan](current/IMPLEMENTATION-PLAN.md) - What was built and what's next
+- [Game Mechanics](reference/GAME-MECHANICS.md) - ls20, vc33, ft09 analysis
+- [ARIA v1 Report](findings/ARIA-V1-REPORT.md) - Why BC/PPO failed
