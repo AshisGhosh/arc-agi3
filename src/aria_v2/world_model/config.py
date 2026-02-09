@@ -22,8 +22,8 @@ class WorldModelConfig:
     # Base model
     model_name: str = "HuggingFaceTB/SmolLM2-360M"
     base_vocab_size: int = 49152
-    total_new_tokens: int = 523
-    total_vocab_size: int = 49675
+    total_new_tokens: int = 589
+    total_vocab_size: int = 49741  # World model vocab (without MASK)
 
     # LoRA
     lora_rank: int = 16
@@ -33,17 +33,22 @@ class WorldModelConfig:
         default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"]
     )
 
-    # Token IDs
-    vq_offset: int = 49152
-    act_offset: int = 49664
-    frame_token: int = 49671
-    act_token: int = 49672
-    level_complete_token: int = 49673
-    game_start_token: int = 49674
+    # Token IDs (unified action tokenization)
+    vq_offset: int = 49152        # 49152-49663 (512 VQ codes)
+    act_type_offset: int = 49664  # 49664-49671 (8 action types)
+    act_loc_offset: int = 49672   # 49672-49736 (65 locations: 64 cells + NULL)
+    act_loc_null: int = 49736     # NULL location for non-spatial actions
+    frame_token: int = 49737
+    act_token: int = 49738
+    level_complete_token: int = 49739
+    game_start_token: int = 49740
+    mask_token: int = 49741       # Used by policy only (not in world model vocab)
 
     # Architecture
     hidden_size: int = 960  # SmolLM2-360M hidden size
     max_context: int = 2048
+    num_action_types: int = 8
+    num_action_locs: int = 65  # 64 VQ cells + 1 NULL
 
 
 @dataclass
@@ -60,13 +65,14 @@ class TrainingConfig:
 
     # Token loss weights
     vq_weight: float = 1.0
-    action_weight: float = 2.0
+    action_type_weight: float = 3.0
+    action_loc_weight: float = 3.0
     level_complete_weight: float = 5.0
     structural_weight: float = 0.0  # FRAME, ACT, GAME_START markers
 
     # Context
     max_seq_len: int = 2048
-    window_stride: int = 670
+    window_stride: int = 690  # ~10 frames * 69 tokens/frame
 
     # Evaluation
     eval_every_epochs: int = 2
@@ -84,18 +90,45 @@ class TrainingConfig:
 
 
 @dataclass
+class PolicyConfig:
+    """Policy head training config."""
+    # Architecture
+    hidden_size: int = 960
+    type_head_hidden: int = 256
+    loc_head_dim: int = 128
+    num_action_types: int = 8
+    num_action_locs: int = 65  # 64 VQ cells + 1 NULL
+    dropout: float = 0.1
+
+    # Training
+    batch_size: int = 8
+    learning_rate: float = 1e-3
+    weight_decay: float = 0.01
+    num_epochs: int = 50
+    max_grad_norm: float = 1.0
+
+    # Paths
+    world_model_checkpoint: str = "checkpoints/world_model/best.pt"
+    vqvae_checkpoint: str = "checkpoints/vqvae/best.pt"
+    output_dir: str = "checkpoints/policy"
+    demo_dir: str = "videos/ARC-AGI-3 Human Performance"
+    cache_dir: str = "checkpoints/world_model/cache"
+
+
+@dataclass
 class AgentConfig:
     """Inference agent config."""
     # Model paths
     world_model_checkpoint: str = "checkpoints/world_model/best.pt"
+    policy_checkpoint: str = "checkpoints/policy/best.pt"
     vqvae_checkpoint: str = "checkpoints/vqvae/best.pt"
 
     # Decision making
     surprise_ema_decay: float = 0.95
-    goal_threshold_factor: float = 2.0  # action must be 2x better than mean
+    goal_threshold_factor: float = 2.0
     surprise_threshold_factor: float = 2.0
 
     # Inference
-    num_candidate_actions: int = 7  # Actions 0-6
+    num_action_types: int = 8
     temperature: float = 1.0
-    max_context_frames: int = 30  # ~2048 tokens
+    max_context_frames: int = 29  # ~2048 tokens at 69 tokens/frame

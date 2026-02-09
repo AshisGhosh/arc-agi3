@@ -23,8 +23,8 @@ from ..tokenizer.frame_tokenizer import FrameVQVAE, VQVAEConfig
 from ..tokenizer.trajectory_dataset import (
     tokenize_all_demos, load_cached_trajectories,
     TrajectoryWindowDataset,
-    VQ_OFFSET, ACT_OFFSET, FRAME_TOKEN, ACT_TOKEN,
-    LEVEL_COMPLETE, GAME_START,
+    VQ_OFFSET, ACT_TYPE_OFFSET, ACT_LOC_OFFSET, ACT_LOC_NULL,
+    FRAME_TOKEN, ACT_TOKEN, LEVEL_COMPLETE, GAME_START,
 )
 
 
@@ -35,7 +35,8 @@ def compute_metrics(logits: torch.Tensor, targets: torch.Tensor, weights: torch.
 
     # Token type masks
     is_vq = (targets >= VQ_OFFSET) & (targets < VQ_OFFSET + 512)
-    is_action = (targets >= ACT_OFFSET) & (targets < ACT_OFFSET + 7)
+    is_action_type = (targets >= ACT_TYPE_OFFSET) & (targets < ACT_TYPE_OFFSET + 8)
+    is_action_loc = (targets >= ACT_LOC_OFFSET) & (targets <= ACT_LOC_NULL)
     is_level = (targets == LEVEL_COMPLETE)
 
     metrics = {}
@@ -46,11 +47,17 @@ def compute_metrics(logits: torch.Tensor, targets: torch.Tensor, weights: torch.
     else:
         metrics["frame_acc"] = 0.0
 
-    # Action token accuracy
-    if is_action.any():
-        metrics["action_acc"] = correct[is_action].float().mean().item()
+    # Action type accuracy
+    if is_action_type.any():
+        metrics["action_type_acc"] = correct[is_action_type].float().mean().item()
     else:
-        metrics["action_acc"] = 0.0
+        metrics["action_type_acc"] = 0.0
+
+    # Action location accuracy
+    if is_action_loc.any():
+        metrics["action_loc_acc"] = correct[is_action_loc].float().mean().item()
+    else:
+        metrics["action_loc_acc"] = 0.0
 
     # Level completion prediction
     if is_level.any():
@@ -130,6 +137,7 @@ def train_world_model(
 
     print("=" * 60)
     print("World Model Training (SmolLM2 + LoRA)")
+    print("  Unified action tokenization: (type, location) pairs")
     print("=" * 60)
 
     # --- Step 1: Load VQ-VAE ---
@@ -143,13 +151,13 @@ def train_world_model(
 
     # --- Step 2: Build/load trajectory dataset ---
     print("\n--- Building Trajectory Dataset ---")
-    cache_path = Path(training_config.cache_dir) / "trajectories.pt"
+    cache_path = Path(training_config.cache_dir) / "trajectories_v2.pt"
 
     if cache_path.exists():
         print(f"Loading cached trajectories from {cache_path}")
         trajectories = load_cached_trajectories(cache_path)
     else:
-        print("Tokenizing demos (first time)...")
+        print("Tokenizing demos with unified action format...")
         trajectories = tokenize_all_demos(
             vqvae,
             training_config.demo_dir,
@@ -226,11 +234,13 @@ def train_world_model(
     global_step = 0
     start_time = time.time()
 
+    metric_keys = ["frame_acc", "action_type_acc", "action_loc_acc", "level_acc", "weighted_acc"]
+
     for epoch in range(1, training_config.num_epochs + 1):
         # --- Train ---
         model.train()
         epoch_loss = 0.0
-        epoch_metrics = {"frame_acc": 0, "action_acc": 0, "level_acc": 0, "weighted_acc": 0}
+        epoch_metrics = {k: 0 for k in metric_keys}
         n_batches = 0
 
         optimizer.zero_grad()
@@ -274,7 +284,7 @@ def train_world_model(
             with torch.no_grad():
                 batch_metrics = compute_metrics(logits.float(), target_ids, target_weights)
                 for k in epoch_metrics:
-                    epoch_metrics[k] += batch_metrics[k]
+                    epoch_metrics[k] += batch_metrics.get(k, 0)
             epoch_loss += loss.item() * training_config.grad_accumulation_steps
             n_batches += 1
 
@@ -285,7 +295,7 @@ def train_world_model(
 
         # --- Eval ---
         val_loss = 0.0
-        val_metrics = {"frame_acc": 0, "action_acc": 0, "level_acc": 0, "weighted_acc": 0}
+        val_metrics = {k: 0 for k in metric_keys}
         val_batches = 0
 
         if epoch % training_config.eval_every_epochs == 0 or epoch == 1:
@@ -309,7 +319,7 @@ def train_world_model(
                     val_loss += loss.item()
                     batch_metrics = compute_metrics(logits.float(), target_ids, target_weights)
                     for k in val_metrics:
-                        val_metrics[k] += batch_metrics[k]
+                        val_metrics[k] += batch_metrics.get(k, 0)
                     val_batches += 1
 
             val_loss /= max(val_batches, 1)
@@ -323,7 +333,9 @@ def train_world_model(
             print(
                 f"Epoch {epoch:3d}/{training_config.num_epochs} | "
                 f"train_loss={epoch_loss:.4f} val_loss={val_loss:.4f} ppl={val_ppl:.1f} | "
-                f"frame={val_metrics['frame_acc']:.3f} act={val_metrics['action_acc']:.3f} "
+                f"frame={val_metrics['frame_acc']:.3f} "
+                f"act_type={val_metrics['action_type_acc']:.3f} "
+                f"act_loc={val_metrics['action_loc_acc']:.3f} "
                 f"level={val_metrics['level_acc']:.3f} | "
                 f"lr={lr:.2e} step={global_step} | {elapsed:.0f}s"
             )
@@ -339,7 +351,9 @@ def train_world_model(
             print(
                 f"Epoch {epoch:3d}/{training_config.num_epochs} | "
                 f"train_loss={epoch_loss:.4f} | "
-                f"frame={epoch_metrics['frame_acc']:.3f} act={epoch_metrics['action_acc']:.3f} | "
+                f"frame={epoch_metrics['frame_acc']:.3f} "
+                f"act_type={epoch_metrics['action_type_acc']:.3f} "
+                f"act_loc={epoch_metrics['action_loc_acc']:.3f} | "
                 f"step={global_step} | {elapsed:.0f}s"
             )
 

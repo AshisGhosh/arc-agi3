@@ -1,94 +1,123 @@
-# Implementation Plan
+# Implementation Plan (v2: Game-Agnostic Redesign)
 
 ## Overview
 
-This documents what has been built and what remains. The learned world model pipeline is complete. The immediate next step is agent evaluation on real games.
+The v1 world model had three structural flaws: (1) click coordinates discarded, (2) action prediction mode-collapsed, (3) policy entangled with dynamics. v2 fixes all three while keeping the VQ-VAE (99.85% accuracy) unchanged.
+
+**What changed:** Action tokenization (unified type+location), world model training (new loss weights), policy architecture (separated, masked).
+**What's the same:** VQ-VAE, SmolLM2-360M + LoRA backbone, bfloat16, training infrastructure.
 
 ---
 
 ## Completed Stages
 
-### Stage 1: VQ-VAE Frame Tokenizer (Done)
+### Stage 1: VQ-VAE Frame Tokenizer (Done, unchanged)
 **Files:** `src/aria_v2/tokenizer/frame_tokenizer.py`, `train_vqvae.py`
 
 - Encodes 64x64 16-color frames → 64 discrete tokens (8x8, 512-code codebook)
-- EMA codebook updates, dead code reset
-- Trained on 13K frames in 1.9 minutes
 - **Result:** 99.85% pixel accuracy, 44.73% codebook utilization
 
-### Stage 2: Trajectory Dataset (Done)
+### Stage 2: Trajectory Dataset v2 (Done, updated)
 **File:** `src/aria_v2/tokenizer/trajectory_dataset.py`
 
-- Loads 28 JSONL human demos from 3 games (ls20, vc33, ft09)
-- Tokenizes frames through frozen VQ-VAE, caches to disk
-- Sliding window (2048 tokens, stride 670) with LEVEL_COMPLETE oversampling
-- **Result:** 876K tokens, ~1,987 training windows
+- **NEW:** Extracts click coordinates from JSONL (`action_input.data.x/y`)
+- **NEW:** Maps pixel coords to VQ cell: `cell = (y//8)*8 + (x//8)`
+- **NEW:** Emits `[ACT] <ACT_TYPE_i> <ACT_LOC_j>` per step (69 tokens/step, up from 67)
+- **NEW:** 589 token vocabulary (was 523): +8 action types, +65 locations, -7 old actions
+- Cache version 2 — old cache must be deleted before retraining
+- **Per game:**
+  - ls20: `<ACT_TYPE_1> <ACT_LOC_NULL>` (navigation, no coordinates)
+  - vc33: `<ACT_TYPE_6> <ACT_LOC_46>` (click at VQ cell 46)
+  - ft09: `<ACT_TYPE_6> <ACT_LOC_37>` (click at VQ cell 37)
 
-### Stage 3: SmolLM2 + LoRA (Done)
+### Stage 3: SmolLM2 + LoRA v2 (Done, updated)
 **File:** `src/aria_v2/world_model/game_transformer.py`
 
-- Extends SmolLM2-360M vocabulary by 523 game tokens
-- LoRA rank=16 on Q, K, V, O (3.9M LoRA + 47M embed/lm_head trainable)
-- Loads in bfloat16 (fp16 causes NaN)
-- **Result:** Model creation verified, forward + backward pass clean
+- Extended vocabulary: 49,741 tokens (was 49,675)
+- **NEW:** ACT_LOC embeddings initialized from VQ codebook (spatial grounding)
+- Same LoRA config, same precision
 
-### Stage 4: Training Pipeline (Done)
+### Stage 4: Training Pipeline v2 (Done, updated)
 **File:** `src/aria_v2/world_model/train.py`
 
-- Next-token prediction with per-token-type weights
-- bfloat16 autocast + float32 loss computation
-- 30 epochs, 77 minutes
-- **Result:** frame=88.4%, action=67.9%, ppl=1.8, level=99.5%, val_loss=0.5721
+- **NEW:** Separate metrics for action_type_acc and action_loc_acc
+- **NEW:** Loss weights: VQ=1.0, action_type=3.0, action_loc=3.0, level=5.0
+- **NEW:** Cache file: `trajectories_v2.pt` (won't conflict with v1 cache)
+- Same training loop, hyperparams, and hardware config
 
-### Stage 5: Inference Agent (Done)
+### Stage 5: Policy Heads (Done, new)
+**File:** `src/aria_v2/world_model/policy_head.py`
+
+- **ActionTypeHead:** Linear(960,256) → GELU → Dropout(0.1) → Linear(256,8) → ~248K params
+- **ActionLocationHead:** Spatial attention (query from frame, keys from 64 VQ cells + NULL) → ~250K params
+- **MASK embedding:** Learned 960-dim vector replacing action tokens
+- Total: ~500K trainable parameters
+
+### Stage 6: Policy Training (Done, new)
+**File:** `src/aria_v2/world_model/train_policy.py`
+
+- Freezes entire backbone (world model weights locked)
+- Replaces action tokens (ACT, ACT_TYPE, ACT_LOC) with MASK in context
+- Trains type_CE + has_location * loc_CE
+- AdamW, lr=1e-3, 50 epochs
+
+### Stage 7: Inference Agent v2 (Done, rewritten)
 **File:** `src/aria_v2/world_model/agent.py`
 
-- Surprise measurement (NLL vs running EMA)
-- Goal inference (P(LEVEL_COMPLETE) per action)
-- Policy: goal-directed / exploration / learned policy selection
-- **Status:** Code complete, not yet evaluated on real games
+- Two contexts: full (for world model) and masked (for policy)
+- Policy forward: backbone on masked context → PolicyHeads → (type, loc)
+- Converts VQ cell → pixel coordinates for click actions
+- Passes spatial data to game API: `env.step(action, data={"x": x, "y": y})`
+
+### Stage 8: Evaluation v2 (Done, updated)
+**File:** `src/aria_v2/world_model/evaluate_world_model.py`
+
+- Tracks action_type_match and action_loc_match separately
+- Handles spatial actions in demo replay
+- All-games mode: evaluate ls20, vc33, ft09 in one run
 
 ---
 
-## Next Steps
+## Next Steps (Execution)
 
-### Step 1: Agent Evaluation on ls20
-**Priority: Immediate**
-
+### Phase 1: Retokenize Data (~10 min)
+Delete old cache, run training which will auto-retokenize:
 ```bash
-uv run python -m src.aria_v2.world_model.agent --game ls20
+rm checkpoints/world_model/cache/trajectories.pt
 ```
 
-Measure:
-- Level completion rate (baseline: 0 from heuristic, target: >0)
-- Human comparison: 11/12 demos completed all levels
-- Action quality: does agent move purposefully or loop?
-- Surprise trace: does surprise spike at meaningful events?
-- Goal inference: does P(LEVEL_COMPLETE) correlate with progress?
+### Phase 2: Retrain World Model (~80 min)
+```bash
+uv run python -m src.aria_v2.world_model.train --epochs 30
+```
 
-### Step 2: Multi-Game Testing
-**Priority: After ls20 evaluation**
+**Decision gate:** frame_acc >80%, action_type_acc >50%, action_loc_acc >40% for click games.
 
-- Test on vc33 and ft09
-- Check if model generalizes across games (trained on all three)
-- Compare per-game performance
+### Phase 3: Validate World Model (~30 min)
+```bash
+uv run python -m src.aria_v2.world_model.evaluate_world_model --mode all-games
+```
 
-### Step 3: Iteration (if needed)
-**Priority: Based on evaluation results**
+Check: Does click-game frame prediction improve now that model sees coordinates?
 
-Possible improvements:
-- More training data (collect additional demos)
-- Longer context window (currently 30 frames / 2048 tokens)
-- Reward shaping during agent inference
-- Temperature tuning for action sampling
-- Beam search for goal-directed planning
+### Phase 4: Train Policy Heads (~20 min)
+```bash
+uv run python -m src.aria_v2.world_model.train_policy --epochs 50
+```
 
-### Step 4: Competition Submission
-**Priority: After satisfactory evaluation**
+**Decision gate:** type_acc >50%, loc_acc >40% for click games.
 
-- Package agent for ARC-AGI-3 submission
-- Ensure arcengine API compatibility
-- Handle new/unseen games gracefully
+### Phase 5: Agent Evaluation (~1 hr)
+```bash
+uv run python -m src.aria_v2.world_model.agent --game ls20
+uv run python -m src.aria_v2.world_model.agent --game vc33
+uv run python -m src.aria_v2.world_model.agent --game ft09
+```
+
+Any level completion = success (baseline: 0).
+
+### Phase 6: Competition Submission
+Package agent for ARC-AGI-3, handle unseen games.
 
 ---
 
@@ -103,16 +132,19 @@ src/aria_v2/
 │
 ├── tokenizer/                          # VQ-VAE pipeline
 │   ├── __init__.py
-│   ├── frame_tokenizer.py              # VQ-VAE model
-│   ├── train_vqvae.py                  # VQ-VAE training
-│   └── trajectory_dataset.py           # JSONL → tokens
+│   ├── frame_tokenizer.py              # VQ-VAE model (unchanged)
+│   ├── train_vqvae.py                  # VQ-VAE training (unchanged)
+│   └── trajectory_dataset.py           # JSONL → tokens (v2: type+loc)
 │
 ├── world_model/                        # SmolLM2 pipeline
 │   ├── __init__.py
-│   ├── config.py                       # All configs
-│   ├── game_transformer.py             # Model creation
-│   ├── train.py                        # Training loop
-│   └── agent.py                        # Inference agent
+│   ├── config.py                       # All configs (v2: +PolicyConfig)
+│   ├── game_transformer.py             # Model creation (v2: 589 tokens)
+│   ├── train.py                        # World model training (v2: new metrics)
+│   ├── policy_head.py                  # NEW: ActionTypeHead + ActionLocationHead
+│   ├── train_policy.py                 # NEW: Frozen backbone policy training
+│   ├── agent.py                        # Inference agent (v2: masked policy)
+│   └── evaluate_world_model.py         # Evaluation (v2: type+loc accuracy)
 │
 ├── core/                               # Heuristic approach (earlier work)
 │   ├── abstract_learner.py
@@ -133,13 +165,43 @@ src/aria_v2/
 ```
 checkpoints/
 ├── vqvae/
-│   └── best.pt                         # VQ-VAE (99.85% acc)
-└── world_model/
-    ├── best.pt                         # SmolLM2 (val_loss=0.5721, 704MB)
-    ├── final.pt                        # Last epoch
-    └── cache/
-        └── trajectories.pt             # Cached tokenized demos
+│   └── best.pt                         # VQ-VAE (99.85% acc) — current
+├── world_model/
+│   ├── best.pt                         # SmolLM2 — NEEDS RETRAINING
+│   ├── final.pt
+│   └── cache/
+│       ├── trajectories.pt             # v1 cache — DELETE before retraining
+│       └── trajectories_v2.pt          # v2 cache (auto-generated)
+└── policy/
+    └── best.pt                         # Policy heads — NOT YET TRAINED
 ```
+
+---
+
+## Token Vocabulary (v2)
+
+| Token Range | Type | Count | IDs |
+|---|---|---|---|
+| VQ codes | Frame codes | 512 | 49152–49663 |
+| ACT_TYPE | Action type | 8 | 49664–49671 |
+| ACT_LOC | Action location | 65 | 49672–49736 (0-63=cells, 64=NULL) |
+| FRAME | Frame marker | 1 | 49737 |
+| ACT | Action marker | 1 | 49738 |
+| LEVEL_COMPLETE | Level boundary | 1 | 49739 |
+| GAME_START | Trajectory start | 1 | 49740 |
+| MASK | Policy mask (not in world model) | 1 | 49741 |
+| **Total new tokens** | | **589** (+1 MASK) | 49152–49741 |
+
+### Sequence Format (69 tokens per step)
+```
+[GAME_START]
+[FRAME] vq_0..vq_63 [ACT] <ACT_TYPE_i> <ACT_LOC_j>
+[FRAME] vq_0..vq_63 [ACT] <ACT_TYPE_i> <ACT_LOC_j>
+...
+[LEVEL_COMPLETE]
+```
+
+2048 context ÷ 69 tokens/step ≈ 29 frames per window.
 
 ---
 
@@ -148,35 +210,48 @@ checkpoints/
 ### Human Demonstrations
 Location: `videos/ARC-AGI-3 Human Performance/`
 
-| Game | Demos | Frames | Notes |
-|------|-------|--------|-------|
-| ls20 | 12 | ~8,700 | Block-sliding puzzle, 11/12 won |
-| vc33 | ~8 | ~2,200 | |
-| ft09 | ~8 | ~2,100 | |
-| **Total** | **28** | **~13,000** | |
-
-### Key Facts About ls20
-- Color 12 = player (controllable)
-- Color 9 = target regions
-- Color 11 = move counter
-- Colors 3, 4 = background/walls
-- Requires 29+ actions per level, 7 levels total
-- Human average: 400-850 steps to complete all levels
+| Game | Demos | Frames | Action Type | Click Coords |
+|------|-------|--------|-------------|-------------|
+| ls20 | 12 | ~8,700 | 1-4 (directional) | None (ACT_LOC_NULL) |
+| vc33 | ~8 | ~2,200 | 6 (click) | 51/64 cells covered |
+| ft09 | ~8 | ~2,100 | 6 (click) | 61/64 cells covered |
+| **Total** | **28** | **~13,000** | | |
 
 ---
 
 ## Commands
 
 ```bash
-# Train VQ-VAE (if needed)
-uv run python -m src.aria_v2.tokenizer.train_vqvae
+# Delete old cache (required before first v2 training)
+rm checkpoints/world_model/cache/trajectories.pt
 
-# Train world model (if needed)
-uv run python -m src.aria_v2.world_model.train --epochs 30 --batch-size 4
+# Train world model (v2)
+uv run python -m src.aria_v2.world_model.train --epochs 30
+
+# Evaluate world model
+uv run python -m src.aria_v2.world_model.evaluate_world_model --mode all-games
+
+# Train policy heads
+uv run python -m src.aria_v2.world_model.train_policy --epochs 50
 
 # Run agent
 uv run python -m src.aria_v2.world_model.agent --game ls20
 
+# Train VQ-VAE (only if needed, unchanged)
+uv run python -m src.aria_v2.tokenizer.train_vqvae
+
 # Check VRAM
 nvidia-smi
 ```
+
+---
+
+## Risk Assessment
+
+| Risk | Likelihood | Mitigation |
+|------|-----------|------------|
+| 8x8 spatial resolution too coarse for clicks | Low (80-95% cell coverage) | Add sub-cell refinement later |
+| Policy overfits on 13K frames | Medium | 500K params, dropout 0.1, early stopping |
+| World model quality degrades with new tokens | Low (+2 tokens/step) | Validate frame acc before policy |
+| Two forward passes too slow | Low (~60ms total) | KV cache if needed |
+| Unknown games have action types >7 | Low | ACT_TYPE slots expandable |

@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-World Model Agent: uses trained SmolLM2 for game understanding and action selection.
+Game-agnostic agent with separated world model and policy.
 
-Three capabilities from one model:
-1. World model: predict next frame, measure surprise
-2. Goal inference: probe LEVEL_COMPLETE probability per action
-3. Action selection: goal-directed / exploration / policy
+Architecture:
+    World Model (SmolLM2 + LoRA): maintains full context with action tokens,
+        provides dynamics prediction and surprise measurement.
+    Policy (ActionTypeHead + ActionLocationHead): operates on MASKED context
+        where action tokens are replaced with MASK. Cannot copy actions.
+
+Every action = (type, location):
+    - type: which action (0-7)
+    - location: where (0-63 = VQ cell, 64 = NULL for non-spatial)
 
 Usage:
     uv run python -m src.aria_v2.world_model.agent --game ls20
@@ -21,30 +26,28 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .config import AgentConfig, WorldModelConfig
+from .config import AgentConfig, WorldModelConfig, PolicyConfig
 from .game_transformer import create_game_transformer
-from ..tokenizer.frame_tokenizer import FrameVQVAE, VQVAEConfig
+from .policy_head import PolicyHeads
+from ..tokenizer.frame_tokenizer import FrameVQVAE
 from ..tokenizer.trajectory_dataset import (
-    VQ_OFFSET, ACT_OFFSET, FRAME_TOKEN, ACT_TOKEN,
-    LEVEL_COMPLETE, GAME_START,
+    VQ_OFFSET, ACT_TYPE_OFFSET, ACT_LOC_OFFSET, ACT_LOC_NULL,
+    FRAME_TOKEN, ACT_TOKEN, LEVEL_COMPLETE, GAME_START,
+    MASK_TOKEN, vq_cell_to_pixel,
 )
 
 
 class WorldModelAgent:
     """
-    Agent that uses a trained world model for action selection.
+    Agent with separated dynamics (world model) and policy (masked heads).
 
-    Decision loop (no thresholds, uses relative comparisons):
-        surprise = model_nll(actual_frame) vs surprise_ema
-        goal_scores = [P(LEVEL_COMPLETE | action=a) for a in actions]
-        policy_probs = model_action_distribution(context)
-
-        if max(goal_scores) > 2 * mean(goal_scores):  # one action clearly better
-            action = argmax(goal_scores)
-        elif surprise > 2 * surprise_ema:               # something unexpected
-            action = argmax(prediction_entropy)
-        else:
-            action = sample(policy_probs)
+    Inference loop:
+        1. Encode frame via VQ-VAE
+        2. Update world model context (includes real action tokens)
+        3. Create masked context (action tokens → MASK)
+        4. Run backbone on masked context
+        5. Policy heads predict (action_type, action_location)
+        6. Convert to game API call
     """
 
     def __init__(self, config: AgentConfig | None = None, device: str = "cuda"):
@@ -60,20 +63,31 @@ class WorldModelAgent:
         self.vqvae.load_state_dict(vqvae_ckpt["model_state_dict"])
         self.vqvae.eval()
 
-        # Load world model
-        print("Loading world model...")
+        # Load world model backbone
+        print("Loading world model backbone...")
         wm_ckpt = torch.load(
             self.config.world_model_checkpoint, weights_only=False, map_location=device
         )
         model_config = wm_ckpt.get("model_config", WorldModelConfig())
-        self.model = create_game_transformer(model_config)
-        self.model.load_state_dict(wm_ckpt["model_state_dict"])
-        self.model = self.model.to(device)
-        self.model.eval()
+        self.backbone = create_game_transformer(model_config)
+        self.backbone.load_state_dict(wm_ckpt["model_state_dict"])
+        self.backbone = self.backbone.to(device)
+        self.backbone.eval()
 
-        # Context buffer (token IDs)
+        # Load policy heads
+        print("Loading policy heads...")
+        policy_ckpt = torch.load(
+            self.config.policy_checkpoint, weights_only=False, map_location=device
+        )
+        policy_config = policy_ckpt.get("policy_config", PolicyConfig())
+        self.policy = PolicyHeads(policy_config).to(device)
+        self.policy.load_state_dict(policy_ckpt["policy_state_dict"])
+        self.policy.eval()
+
+        # Context buffer (token IDs — full context with action tokens)
         self.context: list[int] = [GAME_START]
-        self.max_context_tokens = self.config.max_context_frames * 67  # ~67 tokens per frame
+        self.context_types: list[str] = ["start"]
+        self.max_context_tokens = self.config.max_context_frames * 69
 
         # Surprise tracking
         self.surprise_ema = 1.0
@@ -86,16 +100,22 @@ class WorldModelAgent:
         self.policy_count = 0
         self.last_decision_reason = ""
 
-    def act(self, frame: np.ndarray, level_completed: bool = False) -> int:
+    def act(
+        self,
+        frame: np.ndarray,
+        available_actions: list[int] | None = None,
+        level_completed: bool = False,
+    ) -> tuple[int, int | None, int | None]:
         """
         Choose an action given the current frame.
 
         Args:
             frame: [64, 64] numpy array with values 0-15
+            available_actions: list of available action type IDs (1-indexed from game API)
             level_completed: True if a level was just completed
 
         Returns:
-            Action ID (0-6)
+            (action_type, x, y) where x,y are pixel coords or None for non-spatial
         """
         self.step_count += 1
 
@@ -107,183 +127,121 @@ class WorldModelAgent:
         # Insert LEVEL_COMPLETE if applicable
         if level_completed:
             self.context.append(LEVEL_COMPLETE)
+            self.context_types.append("level")
 
         # Add frame to context
         self.context.append(FRAME_TOKEN)
+        self.context_types.append("frame")
         for code in frame_codes:
             self.context.append(VQ_OFFSET + code)
+            self.context_types.append("vq")
 
         # Trim context if too long
         if len(self.context) > self.max_context_tokens:
-            # Keep GAME_START + trim from front
             excess = len(self.context) - self.max_context_tokens
             self.context = [GAME_START] + self.context[excess + 1:]
+            self.context_types = ["start"] + self.context_types[excess + 1:]
 
-        # Compute surprise for this frame
-        surprise = self._compute_surprise()
+        # Create masked context for policy
+        masked_context = self._mask_actions(self.context, self.context_types)
 
-        # Compute goal scores for each candidate action
-        goal_scores = self._compute_goal_scores()
+        # Run backbone on masked context, get hidden states
+        action_type, action_loc = self._policy_forward(masked_context)
 
-        # Get policy distribution
-        policy_probs = self._get_policy_distribution()
+        # Mask to available actions if provided
+        if available_actions is not None:
+            # available_actions are 1-indexed from game API
+            available_set = set(a - 1 for a in available_actions if a > 0)  # Convert to 0-indexed
+            if action_type not in available_set and available_set:
+                action_type = min(available_set)  # Fallback
 
-        # Decision
-        action = self._select_action(surprise, goal_scores, policy_probs)
+        # Convert location to pixel coordinates
+        if action_loc < 64:
+            x, y = vq_cell_to_pixel(action_loc)
+        else:
+            x, y = None, None
 
-        # Add action to context
+        # Update world model context with chosen action
         self.context.append(ACT_TOKEN)
-        self.context.append(ACT_OFFSET + action)
+        self.context_types.append("act")
+        self.context.append(ACT_TYPE_OFFSET + action_type)
+        self.context_types.append("action_type")
+        self.context.append(ACT_LOC_OFFSET + action_loc)
+        self.context_types.append("action_loc")
 
-        return action
-
-    @torch.no_grad()
-    def _compute_surprise(self) -> float:
-        """Compute how surprised the model is by the current frame."""
-        if len(self.context) < 70:  # Need at least one prior frame
-            return 0.0
-
-        # Get model prediction for current frame tokens
-        # We look at the last 65 tokens (FRAME + 64 VQ codes)
-        ctx = torch.tensor(self.context[:-65], dtype=torch.long).unsqueeze(0).to(self.device)
-        target = torch.tensor(self.context[-65:], dtype=torch.long).unsqueeze(0).to(self.device)
-
-        # Only predict if context is long enough
-        if ctx.shape[1] < 2:
-            return 0.0
-
-        # Combine and get logits
-        full_input = torch.cat([ctx, target[:, :-1]], dim=1)
-        outputs = self.model(input_ids=full_input)
-        logits = outputs.logits
-
-        # NLL of the actual frame tokens
-        frame_logits = logits[:, -65:, :]  # Predictions for the frame tokens
-        frame_targets = target
-        loss = F.cross_entropy(
-            frame_logits.reshape(-1, frame_logits.shape[-1]),
-            frame_targets.reshape(-1),
-        )
-        surprise = loss.item()
-
-        # Update EMA
-        self.surprise_ema = (
-            self.config.surprise_ema_decay * self.surprise_ema
-            + (1 - self.config.surprise_ema_decay) * surprise
-        )
-        self.surprise_history.append(surprise)
-
-        return surprise
-
-    @torch.no_grad()
-    def _compute_goal_scores(self) -> list[float]:
-        """
-        For each candidate action, compute P(LEVEL_COMPLETE) in next few tokens.
-        """
-        scores = []
-        base_ctx = self.context.copy()
-
-        for action_id in range(self.config.num_candidate_actions):
-            # Extend context with this action
-            extended = base_ctx + [ACT_TOKEN, ACT_OFFSET + action_id]
-            ctx_tensor = torch.tensor(extended, dtype=torch.long).unsqueeze(0).to(self.device)
-
-            # Get prediction for next token
-            outputs = self.model(input_ids=ctx_tensor)
-            next_logits = outputs.logits[:, -1, :]  # [1, V]
-
-            # P(LEVEL_COMPLETE) as next token
-            probs = F.softmax(next_logits, dim=-1)
-            p_level = probs[0, LEVEL_COMPLETE].item()
-
-            # Also check P(LEVEL_COMPLETE) after predicted next frame
-            # This is more expensive but more accurate - skip for now
-            scores.append(p_level)
-
-        return scores
-
-    @torch.no_grad()
-    def _get_policy_distribution(self) -> list[float]:
-        """Get model's action probability distribution given current context."""
-        # Context should end with frame tokens (before action)
-        ctx_tensor = torch.tensor(
-            self.context + [ACT_TOKEN], dtype=torch.long
-        ).unsqueeze(0).to(self.device)
-
-        outputs = self.model(input_ids=ctx_tensor)
-        logits = outputs.logits[:, -1, :]  # [1, V]
-
-        # Extract action token probabilities
-        action_logits = logits[0, ACT_OFFSET:ACT_OFFSET + self.config.num_candidate_actions]
-        probs = F.softmax(action_logits / self.config.temperature, dim=-1)
-        return probs.cpu().tolist()
-
-    def _select_action(
-        self, surprise: float, goal_scores: list[float], policy_probs: list[float]
-    ) -> int:
-        """
-        Select action based on surprise, goal scores, and policy.
-
-        No magic thresholds - uses relative comparisons.
-        """
-        max_goal = max(goal_scores)
-        mean_goal = sum(goal_scores) / len(goal_scores) if goal_scores else 0
-
-        # 1. Goal-directed: one action clearly leads toward LEVEL_COMPLETE
-        if mean_goal > 0 and max_goal > self.config.goal_threshold_factor * mean_goal:
-            self.goal_directed_count += 1
-            action = int(np.argmax(goal_scores))
-            self.last_decision_reason = f"goal-directed (score={max_goal:.4f}, mean={mean_goal:.4f})"
-            return action
-
-        # 2. Exploration: something unexpected happened
-        if surprise > self.config.surprise_threshold_factor * self.surprise_ema and self.step_count > 5:
-            self.exploration_count += 1
-            # Choose action that maximizes prediction entropy (most uncertain outcome)
-            action = self._most_uncertain_action()
-            self.last_decision_reason = f"explore (surprise={surprise:.2f}, ema={self.surprise_ema:.2f})"
-            return action
-
-        # 3. Policy: follow learned distribution
         self.policy_count += 1
-        probs = np.array(policy_probs)
-        probs = probs / probs.sum()  # Renormalize
-        action = np.random.choice(len(probs), p=probs)
-        self.last_decision_reason = f"policy (top={probs.max():.2f})"
-        return int(action)
+        self.last_decision_reason = f"policy (type={action_type}, loc={action_loc})"
+
+        # Return 1-indexed action type for game API
+        return action_type + 1, x, y
+
+    def _mask_actions(self, tokens: list[int], types: list[str]) -> list[int]:
+        """Replace action tokens with MASK in context."""
+        masked = list(tokens)
+        for i, tt in enumerate(types):
+            if tt in ("act", "action_type", "action_loc"):
+                masked[i] = MASK_TOKEN
+        return masked
 
     @torch.no_grad()
-    def _most_uncertain_action(self) -> int:
-        """Find action that leads to most uncertain next state (max entropy)."""
-        entropies = []
-        base_ctx = self.context.copy()
+    def _policy_forward(self, masked_context: list[int]) -> tuple[int, int]:
+        """Run policy heads on masked context.
 
-        for action_id in range(self.config.num_candidate_actions):
-            extended = base_ctx + [ACT_TOKEN, ACT_OFFSET + action_id, FRAME_TOKEN]
-            ctx_tensor = torch.tensor(extended, dtype=torch.long).unsqueeze(0).to(self.device)
+        Returns (action_type, action_loc) as integer indices.
+        """
+        ctx_tensor = torch.tensor(masked_context, dtype=torch.long).unsqueeze(0).to(self.device)
 
-            outputs = self.model(input_ids=ctx_tensor)
-            logits = outputs.logits[:, -1, :]
+        use_amp = torch.cuda.is_bf16_supported()
+        amp_dtype = torch.bfloat16 if use_amp else torch.float32
 
-            # Entropy of next VQ token prediction
-            probs = F.softmax(logits[0, VQ_OFFSET:VQ_OFFSET + 512], dim=-1)
-            entropy = -(probs * (probs + 1e-10).log()).sum().item()
-            entropies.append(entropy)
+        with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+            # Get input embeddings and inject mask embedding
+            input_embeds = self.backbone.get_input_embeddings()(ctx_tensor)
+            mask_positions = (ctx_tensor == MASK_TOKEN)
+            input_embeds[mask_positions] = self.policy.mask_embedding.to(input_embeds.dtype)
 
-        return int(np.argmax(entropies))
+            # Forward through backbone
+            outputs = self.backbone(inputs_embeds=input_embeds, output_hidden_states=True)
+            hidden_states = outputs.hidden_states[-1]  # [1, T, 960]
+
+        # Find last VQ token position (= last frame boundary for policy)
+        vq_positions = []
+        last_vq_pos = -1
+        for i, tt in enumerate(self.context_types):
+            if tt == "vq":
+                vq_positions.append(i)
+                last_vq_pos = i
+
+        if last_vq_pos < 0 or len(vq_positions) < 64:
+            # Not enough context, return default
+            return 0, 64  # NULL location
+
+        # Get the 64 VQ positions from the LAST frame
+        last_frame_vq = vq_positions[-64:]
+
+        h_frame = hidden_states[0, last_vq_pos].float()  # [960]
+        h_vq_cells = hidden_states[0, last_frame_vq].float()  # [64, 960]
+
+        # Policy forward
+        type_logits, loc_logits = self.policy(
+            h_frame.unsqueeze(0), h_vq_cells.unsqueeze(0)
+        )
+
+        # Sample actions
+        type_probs = F.softmax(type_logits[0] / self.config.temperature, dim=-1)
+        action_type = torch.multinomial(type_probs, 1).item()
+
+        loc_probs = F.softmax(loc_logits[0] / self.config.temperature, dim=-1)
+        action_loc = torch.multinomial(loc_probs, 1).item()
+
+        return action_type, action_loc
 
     def get_stats(self) -> dict:
         """Return agent statistics."""
-        total = max(self.goal_directed_count + self.exploration_count + self.policy_count, 1)
+        total = max(self.policy_count, 1)
         return {
             "steps": self.step_count,
-            "goal_directed": self.goal_directed_count,
-            "exploration": self.exploration_count,
             "policy": self.policy_count,
-            "goal_directed_pct": self.goal_directed_count / total * 100,
-            "exploration_pct": self.exploration_count / total * 100,
-            "policy_pct": self.policy_count / total * 100,
-            "surprise_ema": self.surprise_ema,
             "last_reason": self.last_decision_reason,
             "context_tokens": len(self.context),
         }
@@ -316,7 +274,7 @@ def run_agent(
     # Create game
     if verbose:
         print(f"\n{'='*60}")
-        print(f"Playing {game_id} with World Model Agent")
+        print(f"Playing {game_id} with World Model Agent (v2: separated policy)")
         print(f"{'='*60}")
 
     arc = arc_agi.Arcade()
@@ -324,9 +282,9 @@ def run_agent(
 
     available = env.observation_space.available_actions
     action_map = {}
-    for i in range(1, 7):
+    for i in range(1, 8):
         if i in available:
-            action_map[i] = getattr(GameAction, f"ACTION{i}")
+            action_map[i] = getattr(GameAction, f"ACTION{i}", None)
 
     start_time = time.time()
     action_count = 0
@@ -352,18 +310,30 @@ def run_agent(
             if verbose:
                 print(f"  Level {levels_completed} completed!")
 
-        agent_action = agent.act(frame, level_completed=level_completed)
-        game_action = action_map.get(agent_action, GameAction.ACTION1)
+        action_type, x, y = agent.act(
+            frame,
+            available_actions=list(available),
+            level_completed=level_completed,
+        )
+
+        # Execute action
+        game_action = action_map.get(action_type)
+        if game_action is None:
+            game_action = GameAction.ACTION1
+
+        if x is not None and y is not None:
+            env.step(game_action, data={"x": x, "y": y})
+        else:
+            env.step(game_action)
 
         if verbose and action_count % 20 == 0:
             stats = agent.get_stats()
+            loc_str = f"({x},{y})" if x is not None else "null"
             print(
-                f"Step {action_count}: action={agent_action} | "
-                f"{stats['last_reason']} | "
-                f"ctx={stats['context_tokens']} tokens"
+                f"Step {action_count}: type={action_type} loc={loc_str} | "
+                f"{stats['last_reason']} | ctx={stats['context_tokens']} tokens"
             )
 
-        env.step(game_action)
         action_count += 1
 
     duration = time.time() - start_time
@@ -375,12 +345,8 @@ def run_agent(
         print(f"{'='*60}")
         print(f"Actions: {action_count}")
         print(f"Levels: {levels_completed}")
-        print(f"Time: {duration:.1f}s")
-        print(f"Decision breakdown:")
-        print(f"  Goal-directed: {stats['goal_directed']} ({stats['goal_directed_pct']:.1f}%)")
-        print(f"  Exploration: {stats['exploration']} ({stats['exploration_pct']:.1f}%)")
-        print(f"  Policy: {stats['policy']} ({stats['policy_pct']:.1f}%)")
-        print(f"Surprise EMA: {stats['surprise_ema']:.3f}")
+        print(f"Time: {duration:.1f}s ({duration/action_count*1000:.0f}ms/action)")
+        print(f"Context: {stats['context_tokens']} tokens")
 
         print(f"\n{'='*60}")
         print("Scorecard")
@@ -394,11 +360,13 @@ def main():
     parser.add_argument("--max-actions", "-m", type=int, default=500)
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--world-model", default="checkpoints/world_model/best.pt")
+    parser.add_argument("--policy", default="checkpoints/policy/best.pt")
     parser.add_argument("--vqvae", default="checkpoints/vqvae/best.pt")
     args = parser.parse_args()
 
     config = AgentConfig(
         world_model_checkpoint=args.world_model,
+        policy_checkpoint=args.policy,
         vqvae_checkpoint=args.vqvae,
     )
     run_agent(
