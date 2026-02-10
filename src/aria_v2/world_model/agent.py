@@ -149,9 +149,11 @@ class WorldModelAgent:
         action_type, action_loc = self._policy_forward(masked_context)
 
         # Mask to available actions if provided
+        # Note: action_type from policy head is already in game API space (1-indexed)
+        # because training labels are token_id - ACT_TYPE_OFFSET, and tokens use
+        # ACT_TYPE_OFFSET + game_api_id directly from JSONL data.
         if available_actions is not None:
-            # available_actions are 1-indexed from game API
-            available_set = set(a - 1 for a in available_actions if a > 0)  # Convert to 0-indexed
+            available_set = set(available_actions)
             if action_type not in available_set and available_set:
                 action_type = min(available_set)  # Fallback
 
@@ -172,8 +174,8 @@ class WorldModelAgent:
         self.policy_count += 1
         self.last_decision_reason = f"policy (type={action_type}, loc={action_loc})"
 
-        # Return 1-indexed action type for game API
-        return action_type + 1, x, y
+        # Action type already matches game API (same index space as training data)
+        return action_type, x, y
 
     def _mask_actions(self, tokens: list[int], types: list[str]) -> list[int]:
         """Replace action tokens with MASK in context."""
@@ -195,9 +197,12 @@ class WorldModelAgent:
         amp_dtype = torch.bfloat16 if use_amp else torch.float32
 
         with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
-            # Get input embeddings and inject mask embedding
-            input_embeds = self.backbone.get_input_embeddings()(ctx_tensor)
-            mask_positions = (ctx_tensor == MASK_TOKEN)
+            # Replace MASK_TOKEN with 0 for embedding lookup (out of vocab range)
+            safe_input = ctx_tensor.clone()
+            mask_positions = (safe_input == MASK_TOKEN)
+            safe_input[mask_positions] = 0  # placeholder, will be overwritten
+
+            input_embeds = self.backbone.get_input_embeddings()(safe_input)
             input_embeds[mask_positions] = self.policy.mask_embedding.to(input_embeds.dtype)
 
             # Forward through backbone

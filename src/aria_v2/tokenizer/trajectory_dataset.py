@@ -264,7 +264,8 @@ class TrajectoryWindowDataset(Dataset):
     Sliding-window dataset over tokenized trajectories.
 
     Creates fixed-length windows for training. Windows containing
-    LEVEL_COMPLETE tokens are oversampled 3x.
+    LEVEL_COMPLETE tokens are oversampled 3x. Tracks game_id per
+    window to support game-balanced sampling.
     """
 
     def __init__(
@@ -273,10 +274,15 @@ class TrajectoryWindowDataset(Dataset):
         window_size: int = 2048,
         stride: int = 690,  # ~10 frames * 69 tokens/frame
         level_complete_oversample: int = 3,
+        spatial_loc_weight: float = 10.0,
+        null_loc_weight: float = 1.0,
     ):
         self.window_size = window_size
         self.windows: list[torch.Tensor] = []
         self.token_type_windows: list[list[str]] = []
+        self.game_ids: list[str] = []
+        self.spatial_loc_weight = spatial_loc_weight
+        self.null_loc_weight = null_loc_weight
 
         for traj in trajectories:
             tokens = traj.tokens
@@ -296,6 +302,7 @@ class TrajectoryWindowDataset(Dataset):
 
                 self.windows.append(torch.tensor(window, dtype=torch.long))
                 self.token_type_windows.append(type_window)
+                self.game_ids.append(traj.game_id)
 
                 # Oversample windows with LEVEL_COMPLETE
                 has_level = LEVEL_COMPLETE in tokens[start:end]
@@ -303,9 +310,29 @@ class TrajectoryWindowDataset(Dataset):
                     for _ in range(level_complete_oversample - 1):
                         self.windows.append(torch.tensor(window, dtype=torch.long))
                         self.token_type_windows.append(type_window)
+                        self.game_ids.append(traj.game_id)
 
+        # Print per-game stats
+        from collections import Counter
+        game_counts = Counter(self.game_ids)
         print(f"Created {len(self.windows)} training windows "
               f"(window_size={window_size}, stride={stride})")
+        for game, count in sorted(game_counts.items()):
+            print(f"  {game}: {count} windows ({count/len(self.windows)*100:.1f}%)")
+
+    def get_game_balanced_weights(self) -> torch.Tensor:
+        """Return per-sample weights for WeightedRandomSampler.
+
+        Each game gets equal total sampling probability regardless of
+        how many windows it has.
+        """
+        from collections import Counter
+        game_counts = Counter(self.game_ids)
+        n_games = len(game_counts)
+        weights = []
+        for gid in self.game_ids:
+            weights.append(1.0 / (n_games * game_counts[gid]))
+        return torch.tensor(weights, dtype=torch.float64)
 
     def __len__(self):
         return len(self.windows)
@@ -322,7 +349,11 @@ class TrajectoryWindowDataset(Dataset):
             elif t == "action_type":
                 weights[i] = 3.0
             elif t == "action_loc":
-                weights[i] = 3.0
+                # Differentiate spatial vs NULL location
+                if tokens[i].item() == ACT_LOC_NULL:
+                    weights[i] = self.null_loc_weight
+                else:
+                    weights[i] = self.spatial_loc_weight
             elif t == "level":
                 weights[i] = 5.0
             # frame, act, start, pad → weight 0.0

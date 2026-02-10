@@ -15,7 +15,7 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, random_split, WeightedRandomSampler
 
 from .config import WorldModelConfig, TrainingConfig
 from .game_transformer import create_game_transformer
@@ -37,6 +37,7 @@ def compute_metrics(logits: torch.Tensor, targets: torch.Tensor, weights: torch.
     is_vq = (targets >= VQ_OFFSET) & (targets < VQ_OFFSET + 512)
     is_action_type = (targets >= ACT_TYPE_OFFSET) & (targets < ACT_TYPE_OFFSET + 8)
     is_action_loc = (targets >= ACT_LOC_OFFSET) & (targets <= ACT_LOC_NULL)
+    is_spatial_loc = (targets >= ACT_LOC_OFFSET) & (targets < ACT_LOC_NULL)  # cells 0-63 only
     is_level = (targets == LEVEL_COMPLETE)
 
     metrics = {}
@@ -53,7 +54,13 @@ def compute_metrics(logits: torch.Tensor, targets: torch.Tensor, weights: torch.
     else:
         metrics["action_type_acc"] = 0.0
 
-    # Action location accuracy
+    # Spatial location accuracy (cells 0-63 only, excludes NULL)
+    if is_spatial_loc.any():
+        metrics["spatial_loc_acc"] = correct[is_spatial_loc].float().mean().item()
+    else:
+        metrics["spatial_loc_acc"] = 0.0
+
+    # All location accuracy (including NULL — for backward compat)
     if is_action_loc.any():
         metrics["action_loc_acc"] = correct[is_action_loc].float().mean().item()
     else:
@@ -174,6 +181,8 @@ def train_world_model(
         trajectories,
         window_size=training_config.max_seq_len,
         stride=training_config.window_stride,
+        spatial_loc_weight=training_config.spatial_loc_weight,
+        null_loc_weight=training_config.null_loc_weight,
     )
 
     # Split train/val (90/10)
@@ -182,12 +191,27 @@ def train_world_model(
     train_ds, val_ds = random_split(dataset, [n_train, n_val],
                                      generator=torch.Generator().manual_seed(42))
 
-    train_dl = DataLoader(train_ds, batch_size=training_config.batch_size,
-                          shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
+    # Game-balanced sampling: each game gets equal probability per batch
+    if training_config.game_balanced:
+        full_weights = dataset.get_game_balanced_weights()
+        train_weights = full_weights[train_ds.indices]
+        train_sampler = WeightedRandomSampler(
+            train_weights, num_samples=len(train_weights), replacement=True
+        )
+        train_dl = DataLoader(train_ds, batch_size=training_config.batch_size,
+                              sampler=train_sampler, num_workers=2,
+                              pin_memory=True, drop_last=True)
+        print("Game-balanced sampling: ON")
+    else:
+        train_dl = DataLoader(train_ds, batch_size=training_config.batch_size,
+                              shuffle=True, num_workers=2, pin_memory=True, drop_last=True)
+
     val_dl = DataLoader(val_ds, batch_size=training_config.batch_size,
                         shuffle=False, num_workers=2, pin_memory=True)
 
     print(f"Train: {n_train} windows, Val: {n_val} windows")
+    print(f"Spatial loc weight: {training_config.spatial_loc_weight}, "
+          f"NULL loc weight: {training_config.null_loc_weight}")
     print(f"Steps/epoch: {len(train_dl)}, Effective batch: "
           f"{training_config.batch_size * training_config.grad_accumulation_steps}")
 
@@ -234,7 +258,7 @@ def train_world_model(
     global_step = 0
     start_time = time.time()
 
-    metric_keys = ["frame_acc", "action_type_acc", "action_loc_acc", "level_acc", "weighted_acc"]
+    metric_keys = ["frame_acc", "action_type_acc", "spatial_loc_acc", "action_loc_acc", "level_acc", "weighted_acc"]
 
     for epoch in range(1, training_config.num_epochs + 1):
         # --- Train ---
@@ -335,7 +359,7 @@ def train_world_model(
                 f"train_loss={epoch_loss:.4f} val_loss={val_loss:.4f} ppl={val_ppl:.1f} | "
                 f"frame={val_metrics['frame_acc']:.3f} "
                 f"act_type={val_metrics['action_type_acc']:.3f} "
-                f"act_loc={val_metrics['action_loc_acc']:.3f} "
+                f"spat_loc={val_metrics['spatial_loc_acc']:.3f} "
                 f"level={val_metrics['level_acc']:.3f} | "
                 f"lr={lr:.2e} step={global_step} | {elapsed:.0f}s"
             )
@@ -353,7 +377,7 @@ def train_world_model(
                 f"train_loss={epoch_loss:.4f} | "
                 f"frame={epoch_metrics['frame_acc']:.3f} "
                 f"act_type={epoch_metrics['action_type_acc']:.3f} "
-                f"act_loc={epoch_metrics['action_loc_acc']:.3f} | "
+                f"spat_loc={epoch_metrics['spatial_loc_acc']:.3f} | "
                 f"step={global_step} | {elapsed:.0f}s"
             )
 

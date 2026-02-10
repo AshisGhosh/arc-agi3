@@ -22,13 +22,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from .config import AgentConfig, WorldModelConfig
+from .config import AgentConfig, WorldModelConfig, PolicyConfig
 from .game_transformer import create_game_transformer
+from .policy_head import PolicyHeads
 from ..tokenizer.frame_tokenizer import FrameVQVAE
 from ..tokenizer.trajectory_dataset import (
     VQ_OFFSET, ACT_TYPE_OFFSET, ACT_LOC_OFFSET, ACT_LOC_NULL,
     FRAME_TOKEN, ACT_TOKEN, LEVEL_COMPLETE, GAME_START,
-    pixel_to_vq_cell,
+    MASK_TOKEN, pixel_to_vq_cell,
 )
 
 
@@ -58,6 +59,16 @@ class WorldModelEvaluator:
         self.model.load_state_dict(wm_ckpt["model_state_dict"])
         self.model = self.model.to(device)
         self.model.eval()
+
+        # Load policy heads
+        print("Loading policy heads...")
+        policy_ckpt = torch.load(
+            self.config.policy_checkpoint, weights_only=False, map_location=device
+        )
+        policy_config = policy_ckpt.get("policy_config", PolicyConfig())
+        self.policy = PolicyHeads(policy_config).to(device)
+        self.policy.load_state_dict(policy_ckpt["policy_state_dict"])
+        self.policy.eval()
 
         print("Models loaded.")
 
@@ -127,7 +138,7 @@ class WorldModelEvaluator:
     @torch.no_grad()
     def predict_action(self, context: list[int]) -> tuple[int, list[float], int, list[float]]:
         """
-        Predict action type and location given context ending with VQ codes.
+        Predict action using lm_head (world model dynamics).
 
         Returns:
             (best_type, type_probs, best_loc, loc_probs)
@@ -152,6 +163,63 @@ class WorldModelEvaluator:
         best_loc = loc_probs.argmax().item()
 
         return best_type, type_probs.cpu().tolist(), best_loc, loc_probs.cpu().tolist()
+
+    @torch.no_grad()
+    def predict_action_policy(
+        self, context: list[int], context_types: list[str]
+    ) -> tuple[int, int]:
+        """
+        Predict action using policy heads on masked context.
+
+        This is what the agent actually uses at inference time.
+
+        Returns:
+            (best_type, best_loc)
+        """
+        # Create masked context: replace action tokens with MASK
+        masked = list(context)
+        for i, tt in enumerate(context_types):
+            if tt in ("act", "action_type", "action_loc"):
+                masked[i] = MASK_TOKEN
+
+        ctx_tensor = torch.tensor(masked, dtype=torch.long).unsqueeze(0).to(self.device)
+
+        use_amp = torch.cuda.is_bf16_supported()
+        amp_dtype = torch.bfloat16 if use_amp else torch.float32
+
+        with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
+            # Replace MASK_TOKEN with 0 for embedding lookup (out of vocab range)
+            safe_input = ctx_tensor.clone()
+            mask_positions = (safe_input == MASK_TOKEN)
+            safe_input[mask_positions] = 0  # placeholder, will be overwritten
+
+            input_embeds = self.model.get_input_embeddings()(safe_input)
+            input_embeds[mask_positions] = self.policy.mask_embedding.to(input_embeds.dtype)
+
+            # Forward through backbone
+            outputs = self.model(inputs_embeds=input_embeds, output_hidden_states=True)
+            hidden_states = outputs.hidden_states[-1]  # [1, T, 960]
+
+        # Find last 64 VQ positions (the current frame)
+        vq_positions = [i for i, tt in enumerate(context_types) if tt == "vq"]
+        if len(vq_positions) < 64:
+            return 0, 64  # Not enough context
+
+        last_frame_vq = vq_positions[-64:]
+        last_vq_pos = last_frame_vq[-1]
+
+        h_frame = hidden_states[0, last_vq_pos].float()  # [960]
+        h_vq_cells = hidden_states[0, last_frame_vq].float()  # [64, 960]
+
+        # Policy forward
+        type_logits, loc_logits = self.policy(
+            h_frame.unsqueeze(0), h_vq_cells.unsqueeze(0)
+        )
+
+        best_type = type_logits[0].argmax().item()
+        best_loc = loc_logits[0].argmax().item()
+
+        return best_type, best_loc
 
 
 def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps: int = 200):
@@ -215,6 +283,7 @@ def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps
     frame = np.array(obs.frame[0])
     frame_codes = evaluator.encode_frame(frame)
     context = [GAME_START, FRAME_TOKEN] + [VQ_OFFSET + c for c in frame_codes]
+    context_types = ["start", "frame"] + ["vq"] * 64
 
     results = []
     levels_completed = 0
@@ -229,8 +298,11 @@ def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps
         demo_type = demo_entry["type"]
         demo_loc = demo_entry["loc"]
 
-        # Model predicts action type and location
-        pred_type, type_probs, pred_loc, loc_probs = evaluator.predict_action(context)
+        # Policy heads predict action (masked context — what agent actually uses)
+        policy_type, policy_loc = evaluator.predict_action_policy(context, context_types)
+
+        # lm_head predicts action (full context — dynamics model)
+        lm_type, _, lm_loc, _ = evaluator.predict_action(context)
 
         # Build context with demo's action for frame prediction
         ctx_with_action = context + [
@@ -265,8 +337,12 @@ def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps
         tf_vq_acc = sum(tf_correct) / 64
         pred_frame = evaluator.decode_vq(pred_codes_auto)
         pixel_acc = (pred_frame == actual_frame).mean()
-        type_match = pred_type == min(demo_type, 7)
-        loc_match = pred_loc == demo_loc
+
+        demo_type_clamped = min(demo_type, 7)
+        policy_type_match = policy_type == demo_type_clamped
+        policy_loc_match = policy_loc == demo_loc
+        lm_type_match = lm_type == demo_type_clamped
+        lm_loc_match = lm_loc == demo_loc
 
         score = getattr(obs, 'score', 0) or 0
         level_complete = score > prev_score
@@ -276,12 +352,16 @@ def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps
 
         result = {
             "step": step,
-            "demo_type": demo_type,
+            "demo_type": demo_type_clamped,
             "demo_loc": demo_loc,
-            "pred_type": pred_type,
-            "pred_loc": pred_loc,
-            "type_match": type_match,
-            "loc_match": loc_match,
+            "policy_type": policy_type,
+            "policy_loc": policy_loc,
+            "policy_type_match": policy_type_match,
+            "policy_loc_match": policy_loc_match,
+            "lm_type": lm_type,
+            "lm_loc": lm_loc,
+            "lm_type_match": lm_type_match,
+            "lm_loc_match": lm_loc_match,
             "auto_vq_acc": auto_vq_acc,
             "tf_vq_acc": tf_vq_acc,
             "pixel_acc": pixel_acc,
@@ -292,26 +372,30 @@ def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps
         # Update context with actual frame
         if level_complete:
             context.append(LEVEL_COMPLETE)
+            context_types.append("level")
         context += [
             ACT_TOKEN,
             ACT_TYPE_OFFSET + min(demo_type, 7),
             ACT_LOC_OFFSET + demo_loc,
             FRAME_TOKEN,
         ]
+        context_types += ["act", "action_type", "action_loc", "frame"]
         for c in actual_codes:
             context.append(VQ_OFFSET + c)
+            context_types.append("vq")
 
         # Trim context
         max_ctx = 2048
         if len(context) > max_ctx:
             excess = len(context) - max_ctx
             context = [GAME_START] + context[excess + 1:]
+            context_types = ["start"] + context_types[excess + 1:]
 
         if step % 10 == 0:
             loc_str = f"loc={demo_loc}" if demo_loc < 64 else "loc=NULL"
             print(
                 f"  Step {step:3d}: type={demo_type} {loc_str} | "
-                f"pred_type={pred_type}({type_match}) pred_loc={pred_loc}({loc_match}) | "
+                f"policy=({policy_type},{policy_loc}) lm=({lm_type},{lm_loc}) | "
                 f"auto_vq={auto_vq_acc:.1%} tf_vq={tf_vq_acc:.1%} px={pixel_acc:.1%}"
             )
 
@@ -323,19 +407,38 @@ def evaluate_demo_replay(evaluator: WorldModelEvaluator, game_id: str, max_steps
         avg_auto = sum(r["auto_vq_acc"] for r in results) / len(results)
         avg_tf = sum(r["tf_vq_acc"] for r in results) / len(results)
         avg_px = sum(r["pixel_acc"] for r in results) / len(results)
-        type_match_rate = sum(r["type_match"] for r in results) / len(results)
         spatial_results = [r for r in results if r["demo_loc"] < 64]
-        loc_match_rate = (
-            sum(r["loc_match"] for r in spatial_results) / len(spatial_results)
-            if spatial_results else 0
+        n_spatial = len(spatial_results)
+
+        # Policy head metrics
+        policy_type_rate = sum(r["policy_type_match"] for r in results) / len(results)
+        policy_loc_rate = (
+            sum(r["policy_loc_match"] for r in spatial_results) / n_spatial
+            if n_spatial else 0
         )
+
+        # lm_head metrics
+        lm_type_rate = sum(r["lm_type_match"] for r in results) / len(results)
+        lm_loc_rate = (
+            sum(r["lm_loc_match"] for r in spatial_results) / n_spatial
+            if n_spatial else 0
+        )
+
         print(f"Steps: {len(results)}")
         print(f"Levels completed: {levels_completed}")
-        print(f"Action type match: {type_match_rate:.1%}")
-        print(f"Action location match: {loc_match_rate:.1%} ({len(spatial_results)} spatial actions)")
-        print(f"Avg autoregressive VQ accuracy: {avg_auto:.1%}")
-        print(f"Avg teacher-forced VQ accuracy: {avg_tf:.1%}")
-        print(f"Avg pixel accuracy: {avg_px:.1%}")
+        print(f"")
+        print(f"--- Policy Heads (masked context — what agent uses) ---")
+        print(f"  Action type match: {policy_type_rate:.1%}")
+        print(f"  Action location match: {policy_loc_rate:.1%} ({n_spatial} spatial actions)")
+        print(f"")
+        print(f"--- lm_head (full context — dynamics model) ---")
+        print(f"  Action type match: {lm_type_rate:.1%}")
+        print(f"  Action location match: {lm_loc_rate:.1%} ({n_spatial} spatial actions)")
+        print(f"")
+        print(f"--- Frame Prediction (world model) ---")
+        print(f"  Avg autoregressive VQ accuracy: {avg_auto:.1%}")
+        print(f"  Avg teacher-forced VQ accuracy: {avg_tf:.1%}")
+        print(f"  Avg pixel accuracy: {avg_px:.1%}")
 
     return results
 

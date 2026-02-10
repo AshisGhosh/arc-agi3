@@ -1,133 +1,172 @@
 # Project Progress
 
 ## Current State
-**Phase:** Game-Agnostic World Model + Separated Policy (v2 redesign)
+**Phase:** v3.2 — Learned Game Understanding (Synthetic Pretraining + TTT)
 **Branch:** main
-**Status:** Code complete, needs retraining (world model + policy heads)
+**Status:** Three-layer agent tested. Pivoting to learned understanding model with synthetic game pretraining.
 
 ## Immediate Next Step
-**Retrain world model with unified action tokenization:**
-1. Delete old cache: `rm checkpoints/world_model/cache/trajectories.pt`
-2. Retrain: `uv run python -m src.aria_v2.world_model.train --epochs 30`
-3. Validate: `uv run python -m src.aria_v2.world_model.evaluate_world_model --mode all-games`
-4. Train policy: `uv run python -m src.aria_v2.world_model.train_policy --epochs 50`
-5. Run agent: `uv run python -m src.aria_v2.world_model.agent --game ls20`
+**Build synthetic game engine + learned understanding model:**
+1. Synthetic game framework (navigation, click, collection, mixed)
+2. CNN transition encoder + temporal transformer + decoder heads (~3M params)
+3. Pretraining on synthetic data with TTT (test-time training)
+4. Integration with Layer 1 execution (state graph + pathfinding)
 
 ---
 
-## Architecture (v2)
+## v3.2 Architecture (Learned Understanding + TTT)
 
 ```
-Frame (64x64, 16 colors)
-  → VQ-VAE encoder → 64 discrete tokens (8x8 grid, 512-code codebook)
-  → Unified action tokenization: [ACT] <ACT_TYPE_i> <ACT_LOC_j> (69 tokens/step)
-  → SmolLM2-360M (LoRA) → dynamics prediction (world model)
-  → Masked context → PolicyHeads → action type + location (separated policy)
+Per-transition CNN encoder (0.3ms/step, ~580K params)
+  Input: one_hot(frame_t) + one_hot(frame_t+1) + action_embed
+  Output: 256-dim transition embedding
+  ↓ stored in rolling buffer (last 200)
+Temporal Transformer (15ms every 100 actions, ~2M params)
+  Input: last 100 transition embeddings
+  16 learnable query tokens
+  Output: 16 x 256-dim "understanding state"
+  ↓
+Understanding Decoder Heads (0.1ms, ~520K params)
+  Action-Effect Head: per action → (shift_vector, change_prob, affected_color)
+  Entity-Role Head: per color → (player, wall, collectible, background, counter)
+  Game-Type Head: → classification
+  Confidence Head: → scalar 0-1
+  ↓ structured understanding
+Layer 1: Reactive (<2ms, every action)
+  State graph + plan executor. Uses understanding to guide exploration.
 ```
 
-**Key changes from v1:**
-1. **Unified action = (type, location).** Click coordinates tokenized as VQ cell indices.
-2. **Dynamics separated from policy.** World model predicts next state; policy reads masked context.
-3. **Action masking prevents mode collapse.** Policy cannot copy action history.
+**TTT (Test-Time Training):** LoRA rank 4 on CNN encoder, SGD lr=0.01.
+Self-supervised target: predict next frame. Adapts to each game during play.
 
-See [Architecture Details](current/ARCHITECTURE.md).
+**Key differences from v3.1:**
+- Layer 2 (hand-coded stats) → learned CNN + transformer (discovers concepts)
+- Layer 3 (Qwen2.5-7B LLM) → structured decoder heads (constrained, fast, no hallucination)
+- Pre-trained on diverse synthetic games (not 3 demos)
+- TTT adapts to each game online (not just prompting)
+
+**Total: ~3M params, ~6MB VRAM, ~1.8ms/action amortized.**
 
 ---
 
-## Training Results (v1 — will be superseded by v2 retraining)
+## v3.1 Results (Three-Layer Agent)
 
-| Metric | Target | v1 Achieved | v2 Status |
-|--------|--------|-------------|-----------|
-| VQ-VAE pixel accuracy | >95% | **99.85%** | Unchanged (kept) |
-| VQ-VAE codebook utilization | >50% | **44.73%** | Unchanged |
-| World model frame prediction | >40% | 88.4% (v1) | Retraining needed |
-| World model action type acc | >50% | N/A | New metric |
-| World model action loc acc | >40% | N/A | New metric (click games) |
-| World model perplexity | <20 | 1.8 (v1) | Retraining needed |
-| Policy type accuracy | >50% | N/A | New (separate head) |
-| Policy location accuracy | >40% | N/A | New (separate head) |
-| Agent level completion | >0 levels | Not tested | Pending |
+### Three-Layer Agent (state graph + hand-coded stats + Qwen2.5-7B LLM)
+| Game | Actions | Levels | Speed | Notes |
+|------|---------|--------|-------|-------|
+| **vc33** | 5K | **1** | 4.2ms/act | LLM correctly identified "collection" game type |
+| ls20 | — | — | — | Not yet tested |
+| ft09 | — | — | — | Not yet tested |
+
+**LLM oracle stats (vc33):** 25 calls, ~530ms/call, identified game_type=collection, plan=click_all_targets.
+**Issue found:** LLM hallucinated movement_map for click-only game. Fixed with validation against available actions. Hand-coded Layer 2 works but limited to pre-defined patterns.
+
+### Why pivot to learned understanding
+- LLM hallucinated invalid strategies (movement_map for click-only game)
+- Hand-coded Layer 2 can only detect pre-defined patterns (shifts, counters, region changes)
+- Games with novel mechanics (rotation, conditional effects, gravity) won't be detected
+- Winning competition entries used fast online learning, not LLMs
+- Need: learned primitives that generalize across game types
+
+---
+
+## v3 Results (All Approaches Tested)
+
+### v3 Basic Agent (state graph + CNN)
+| Game | Actions | Levels | Speed | Notes |
+|------|---------|--------|-------|-------|
+| **vc33** | 5K | **1** | 16ms/act | **First level ever completed!** |
+| ls20 | 20K | 0 | 6ms/act | 5700+ unique states, random walk |
+| ft09 | 5K | 0 | 3ms/act | ~80 actions/state branching |
+
+### v3 Dreamer Agent (Transformer world model + imagination)
+| Game | Actions | Levels | Speed | Notes |
+|------|---------|--------|-------|-------|
+| vc33 | 5K | 0 | 6.6ms/act | Policy never converges — no reward signal |
+| ls20 | 5K | 0 | 7.0ms/act | Random policy, no understanding |
+
+---
+
+## Previous Results
+
+### v2 — World Model (Superseded)
+| Metric | v2 Achieved |
+|--------|-------------|
+| VQ-VAE pixel accuracy | **99.85%** |
+| World model frame prediction | **85.3%** |
+| World model action type acc | **61.3%** |
+| Policy type accuracy | **73.5%** |
+| Policy location accuracy | **40.7%** |
+| **Agent level completion** | **0 levels (all games)** |
+
+### v1 — Behavioral Cloning / PPO (Failed)
+- BC: 80% acc, 0% levels
+- PPO: 0.18% success
 
 ---
 
 ## Code Status
 
-### Active Components (v2 Redesign)
+### v3.2 — Learned Understanding (Active Development)
 | Component | File | Status |
 |-----------|------|--------|
-| VQ-VAE Frame Tokenizer | `src/aria_v2/tokenizer/frame_tokenizer.py` | Done (99.85% acc, unchanged) |
-| VQ-VAE Training | `src/aria_v2/tokenizer/train_vqvae.py` | Done (unchanged) |
-| Trajectory Dataset (v2) | `src/aria_v2/tokenizer/trajectory_dataset.py` | **Updated**: unified (type, loc) actions |
-| World Model Config (v2) | `src/aria_v2/world_model/config.py` | **Updated**: new vocab, loss weights, PolicyConfig |
-| SmolLM2 + LoRA (v2) | `src/aria_v2/world_model/game_transformer.py` | **Updated**: 589 tokens, location embedding init |
-| Training Pipeline (v2) | `src/aria_v2/world_model/train.py` | **Updated**: type/loc metrics, v2 cache |
-| Policy Heads | `src/aria_v2/world_model/policy_head.py` | **New**: ActionTypeHead + ActionLocationHead |
-| Policy Training | `src/aria_v2/world_model/train_policy.py` | **New**: frozen backbone, masked training |
-| Inference Agent (v2) | `src/aria_v2/world_model/agent.py` | **Rewritten**: masked policy, spatial actions |
-| Evaluation (v2) | `src/aria_v2/world_model/evaluate_world_model.py` | **Updated**: type + loc accuracy |
+| Synthetic Game Framework | `src/aria_v3/synthetic_games/` | Planned |
+| Transition Encoder CNN | `src/aria_v3/understanding/encoder.py` | Planned |
+| Temporal Transformer | `src/aria_v3/understanding/temporal.py` | Planned |
+| Understanding Decoder | `src/aria_v3/understanding/decoder.py` | Planned |
+| TTT Loop | `src/aria_v3/understanding/ttt.py` | Planned |
+| Data Generation Pipeline | `src/aria_v3/synthetic_games/generate.py` | Planned |
 
-### Earlier Components (Exploratory, not on critical path)
-| Component | File | Notes |
-|-----------|------|-------|
-| Visual Grounding | `src/aria_v2/visual_grounding.py` | 100% accuracy on synthetic games |
-| Synthetic Games | `src/aria_v2/pretraining/synthetic_games.py` | Training data generator |
-| Abstract Learner | `src/aria_v2/core/abstract_learner.py` | Heuristic rule learning |
-| Goal Induction | `src/aria_v2/core/goal_induction.py` | Hypothesis testing |
-| Demonstration Learner | `src/aria_v2/core/demonstration_learner.py` | JSONL demo analysis |
-| Heuristic Agent | `src/aria_v2/core/agent.py` | Older agent loop |
-| Run Game | `src/aria_v2/run_game.py` | Game runner (arcengine) |
+### v3.1 — Three-Layer Agent (Foundation)
+| Component | File | Status |
+|-----------|------|--------|
+| Layer 1: Reactive | `src/aria_v3/three_layer_agent.py` | Done, 1 level vc33 |
+| Layer 2: Learning | `src/aria_v3/learning_engine.py` | Done (hand-coded, to be replaced) |
+| Layer 3: Reasoning | `src/aria_v3/reasoning_oracle.py` | Done (LLM, to be replaced) |
 
-### Checkpoints
-| Checkpoint | Path | Size | Status |
-|------------|------|------|--------|
-| VQ-VAE | `checkpoints/vqvae/best.pt` | ~2MB | Current |
-| World Model (v1) | `checkpoints/world_model/best.pt` | 704MB | Outdated — needs retraining |
-| Trajectory Cache (v1) | `checkpoints/world_model/cache/trajectories.pt` | ~3.5MB | Outdated — delete before retraining |
-| Policy | `checkpoints/policy/best.pt` | TBD | Not yet trained |
+### v3 — Online Learning (Foundation)
+| Component | File | Status |
+|-----------|------|--------|
+| Frame Processor | `src/aria_v3/frame_processor.py` | Done |
+| State Graph | `src/aria_v3/state_graph.py` | Done |
+| Change Predictor CNN | `src/aria_v3/change_predictor.py` | Done |
+| Basic Agent | `src/aria_v3/agent.py` | Done, 1 level on vc33 |
+| Dreamer World Model | `src/aria_v3/world_model.py` | Done, 0 levels |
+| Dreamer Agent | `src/aria_v3/dreamer_agent.py` | Done, 0 levels |
+
+### v2 — World Model (Superseded)
+| Component | File | Status |
+|-----------|------|--------|
+| VQ-VAE | `src/aria_v2/tokenizer/frame_tokenizer.py` | Done (99.85% acc) |
+| World Model + Policy | `src/aria_v2/world_model/` | Complete, 0 levels |
 
 ---
 
 ## Recent Completions
 
-- **[2026-02-09] v2 Redesign Implementation**: Complete rewrite of action tokenization, world model training, and agent architecture. Unified (type, location) action representation. Separated dynamics from policy with architectural action masking. New files: `policy_head.py`, `train_policy.py`. Updated all existing files for new token format.
-- **[2026-02-08] Strategic Reasoning Generation (ft09)**: Generated 57 frame-by-frame reasoning entries for batch_0004.json.
-- **[2026-02-06] World Model Training (v1)**: SmolLM2-360M + LoRA trained 30 epochs in 77min. Frame acc 88.4%, action acc 67.9%.
-- **[2026-02-06] VQ-VAE + Trajectory Pipeline**: 99.85% pixel accuracy, 876K tokens from 28 demos.
-- **[2026-02-05] Heuristic Approach**: Abstract learning, goal induction working on ls20. But brittle and won't generalize.
-- **[2026-02-05] Visual Grounding**: 100% detection + classification on synthetic games.
-- **[2026-02-04] ARIA v1**: BC (80% acc, 0% levels), PPO (0.18% success). Confirmed: puzzle games need understanding, not imitation.
-
----
-
-## Key Decisions
-
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Architecture shift v1 → v2 | VQ-VAE + transformer | BC/PPO failed (0% levels); need game understanding |
-| Base model | SmolLM2-360M | Fits in 24GB VRAM with LoRA, good token prediction |
-| Precision | bfloat16 | fp16 causes NaN with 49K vocab CE loss; bf16 has better range |
-| LoRA rank | 16 on Q,K,V,O | 51M trainable params, sufficient for our data scale |
-| Loss outside autocast | float32 CE | Prevents overflow in large-vocab softmax |
-| **v2: Unified actions** | **(type, location) pairs** | **Enables click game dynamics; game-agnostic** |
-| **v2: Separated policy** | **Masked context + heads** | **Prevents mode collapse; 500K trainable params** |
-| **v2: Action masking** | **MASK token replaces action history** | **Policy can only learn from visual consequences** |
+- **[2026-02-10] Three-Layer Agent Tested on vc33**: 1 level, 4.2ms/act. LLM hallucinated invalid strategy (fixed with validation).
+- **[2026-02-10] Three-Layer Agent Built**: Reactive + Learning + Reasoning oracle integrated.
+- **[2026-02-10] Three-Layer Architecture Design**: Reactive + Learning + Reasoning. LLM oracle for interpretation.
+- **[2026-02-10] Dreamer Agent Tested**: 0 levels on vc33/ls20. No reward signal.
+- **[2026-02-09] v3 Basic Agent First Run**: 1 level on vc33 (first ever!). 3-16ms/action.
+- **[2026-02-09] Competition Rules Discovery**: No demos at test time. 150+ unknown games.
+- **[2026-02-06] VQ-VAE + Trajectory Pipeline**: 99.85% pixel accuracy.
 
 ---
 
 ## What's Next
 
-1. **Retrain World Model** — With new unified action tokenization (~80 min)
-2. **Validate World Model** — Check frame prediction on all 3 games, especially click games
-3. **Train Policy Heads** — On frozen backbone with masked context (~20 min)
-4. **Agent Evaluation** — Run on ls20, vc33, ft09, measure levels completed
-5. **Competition** — Submit to ARC-AGI-3
+1. **Synthetic game framework** — navigation, click, collection, mixed, push, conditional
+2. **Learned understanding model** — CNN encoder + temporal transformer + decoder heads
+3. **Pretraining pipeline** — data generation, augmentation (color/action/spatial permutations)
+4. **TTT integration** — LoRA adaptation during play
+5. **Evaluation** — all 3 public games + synthetic holdout
+6. **Competition submission** — ARC Prize 2026 (March 25, 2026)
 
 ---
 
 ## Links
-- [Design Document v2](current/DESIGN-DOC-V2.md) - Standalone architecture + data plan (start here)
-- [Architecture](current/ARCHITECTURE.md) - v2 component-level architecture reference
-- [Implementation Plan](current/IMPLEMENTATION-PLAN.md) - Phase-by-phase execution plan
-- [v1 World Model Analysis](findings/V1-WORLD-MODEL-ANALYSIS.md) - Why v1 had structural flaws
+- [Competition Rules](reference/COMPETITION-RULES.md) - **READ FIRST** — ground truth
+- [Implementation Plan](current/IMPLEMENTATION-PLAN.md) - v3.2 learned understanding plan
 - [Game Mechanics](reference/GAME-MECHANICS.md) - ls20, vc33, ft09 analysis
 - [ARIA v1 Report](findings/ARIA-V1-REPORT.md) - Why BC/PPO failed

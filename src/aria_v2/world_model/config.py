@@ -66,9 +66,13 @@ class TrainingConfig:
     # Token loss weights
     vq_weight: float = 1.0
     action_type_weight: float = 3.0
-    action_loc_weight: float = 3.0
+    spatial_loc_weight: float = 10.0   # Spatial click locations (cells 0-63)
+    null_loc_weight: float = 0.0       # NULL location — no gradient (learned from context)
     level_complete_weight: float = 5.0
     structural_weight: float = 0.0  # FRAME, ACT, GAME_START markers
+
+    # Game-balanced sampling
+    game_balanced: bool = True  # Equalize sampling across games
 
     # Context
     max_seq_len: int = 2048
@@ -132,3 +136,26 @@ class AgentConfig:
     num_action_types: int = 8
     temperature: float = 1.0
     max_context_frames: int = 29  # ~2048 tokens at 69 tokens/frame
+
+
+@dataclass
+class PlanningConfig:
+    """KV-cache lookahead planning agent config."""
+    # Model paths (no policy checkpoint needed — uses lm_head directly)
+    world_model_checkpoint: str = "checkpoints/world_model/best.pt"
+    vqvae_checkpoint: str = "checkpoints/vqvae/best.pt"
+
+    # Planning parameters
+    top_k_types: int = 3          # Candidate action types to explore
+    top_k_locs: int = 3           # Candidate locations per type
+    level_complete_weight: float = 10.0   # Weight for P(LEVEL_COMPLETE)
+    frame_change_weight: float = 1.0      # Weight for frame difference
+    type_prior_weight: float = 0.5        # Weight for lm_head type prior
+
+    # Inference
+    temperature: float = 0.8      # Sampling temperature for tie-breaking
+    max_context_frames: int = 29  # ~2048 tokens at 69 tokens/frame
+
+    # Exploration
+    repeat_penalty: float = 0.5   # Penalty for repeating recent actions
+    repeat_window: int = 5        # How many recent actions to penalize
