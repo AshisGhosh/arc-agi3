@@ -193,6 +193,53 @@ class StateGraph:
 
         return None  # No frontier reachable
 
+    def get_full_path_to_frontier(self, from_hash: str) -> list[int] | None:
+        """BFS to find shortest path to a state with untested actions.
+
+        Returns list of action indices forming the full path, or None.
+        """
+        if from_hash not in self.nodes:
+            return None
+
+        # Check if current node has untested actions
+        untested = self.get_untested_action(from_hash)
+        if untested is not None:
+            return [untested]
+
+        # BFS through SUCCESS edges, tracking full path
+        visited = {from_hash}
+        # Queue entries: (current_hash, path of action indices)
+        queue: deque[tuple[str, list[int]]] = deque()
+
+        node = self.nodes[from_hash]
+        for edge in node.edges:
+            if edge.result == EdgeResult.SUCCESS and edge.target_hash not in visited:
+                visited.add(edge.target_hash)
+                queue.append((edge.target_hash, [edge.action_id]))
+
+        while queue:
+            current_hash, path = queue.popleft()
+            current_node = self.nodes.get(current_hash)
+            if current_node is None:
+                continue
+
+            if any(e.result == EdgeResult.UNTESTED for e in current_node.edges):
+                # Also append the untested action at the frontier
+                for e in current_node.edges:
+                    if e.result == EdgeResult.UNTESTED:
+                        return path + [e.action_id]
+
+            # Limit BFS depth to avoid very long paths
+            if len(path) > 30:
+                continue
+
+            for edge in current_node.edges:
+                if edge.result == EdgeResult.SUCCESS and edge.target_hash not in visited:
+                    visited.add(edge.target_hash)
+                    queue.append((edge.target_hash, path + [edge.action_id]))
+
+        return None
+
     def is_known_dead(self, frame_hash: str, action_id: int) -> bool:
         """Check if a specific action from a state is known to be dead."""
         node = self.nodes.get(frame_hash)

@@ -1,16 +1,18 @@
 # Project Progress
 
 ## Current State
-**Phase:** v3.2 — Learned Game Understanding (Synthetic Pretraining + TTT)
+**Phase:** v3.2 concluded → v4 pivot pending
 **Branch:** main
-**Status:** Three-layer agent tested. Pivoting to learned understanding model with synthetic game pretraining.
+**Status:** v3.2 post-mortem complete. Pivoting to v4 (online P(frame_change) CNN, StochasticGoose-inspired).
 
 ## Immediate Next Step
-**Build synthetic game engine + learned understanding model:**
-1. Synthetic game framework (navigation, click, collection, mixed)
-2. CNN transition encoder + temporal transformer + decoder heads (~3M params)
-3. Pretraining on synthetic data with TTT (test-time training)
-4. Integration with Layer 1 execution (state graph + pathfinding)
+**v4 Implementation — Online P(frame_change) CNN:**
+1. Design v4 architecture (online CNN, no pretraining, visual generalization)
+2. Implement v4 agent with state graph + online CNN
+3. Test on ls20, vc33, ft09
+4. Target: >3 levels across 3 games
+
+**Why pivot:** v3.2 post-mortem identified fundamental flaws. See [V3 Post-Mortem](findings/V3-POSTMORTEM.md).
 
 ---
 
@@ -46,6 +48,31 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 - TTT adapts to each game online (not just prompting)
 
 **Total: ~3M params, ~6MB VRAM, ~1.8ms/action amortized.**
+
+---
+
+## v3.2 Results (Understanding Agent)
+
+### Understanding Agent (pretrained CNN+Transformer + TTT + empirical detection)
+| Game | Actions | Levels | Speed | Notes |
+|------|---------|--------|-------|-------|
+| **vc33** | 5K | **1** | 1.0ms/act | Level 1 @ action 84. walls=[5,9], collectibles=[4,7,14] |
+| **ls20** | 20K | **0-1** | 1.2ms/act | Level 1 sometimes found (~14K actions). Movement map correct. |
+| ft09 | 10K | 0 | 1.6ms/act | State space saturated at 551 nodes, 43% dead edges |
+
+**Key improvements over v3/v3.1:**
+- Empirical entity detection: player, walls, collectibles identified from frame stats
+- Empirical movement map: all 4 directions correct on ls20 by step ~100
+- Blended model/empirical change_prob: fixes model suppressing valid actions
+- Committed frontier navigation: full BFS path execution (no oscillation)
+- Speed: 1.0-1.2ms/action (3x faster than v3 basic, 4x faster than v3.1)
+- 6300+ nodes explored in 20K actions on ls20 (vs 5700 for v3 basic)
+
+**Remaining issues:**
+- ls20 level completion is stochastic (game requires key-lock matching, random exploration)
+- ft09 state space is small (551 nodes) and fully explored but goal not found
+- vc33 gets stuck after level 1 (level 2 requires more sophisticated click patterns)
+- Model entity roles fail on real games (compensated by empirical fallback)
 
 ---
 
@@ -110,12 +137,16 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 ### v3.2 — Learned Understanding (Active Development)
 | Component | File | Status |
 |-----------|------|--------|
-| Synthetic Game Framework | `src/aria_v3/synthetic_games/` | Planned |
-| Transition Encoder CNN | `src/aria_v3/understanding/encoder.py` | Planned |
-| Temporal Transformer | `src/aria_v3/understanding/temporal.py` | Planned |
-| Understanding Decoder | `src/aria_v3/understanding/decoder.py` | Planned |
-| TTT Loop | `src/aria_v3/understanding/ttt.py` | Planned |
-| Data Generation Pipeline | `src/aria_v3/synthetic_games/generate.py` | Planned |
+| Synthetic Game Framework | `src/aria_v3/synthetic_games/` | Done (3 archetypes, 3600 sequences) |
+| Data Generation Pipeline | `src/aria_v3/synthetic_games/generate.py` | Done (578K transitions) |
+| Transition Encoder CNN | `src/aria_v3/understanding/encoder.py` | Done (578K params) |
+| Temporal Transformer | `src/aria_v3/understanding/temporal.py` | Done (3.2M params) |
+| Understanding Decoder | `src/aria_v3/understanding/decoder.py` | Done (shift classification, 85K params) |
+| Full Model + Dataset | `src/aria_v3/understanding/model.py`, `dataset.py` | Done |
+| Training Script | `src/aria_v3/understanding/train.py` | Done (30 epochs, 19 min) |
+| TTT Engine | `src/aria_v3/understanding/ttt.py` | Done (LoRA, runs on real games) |
+| Pretrained Checkpoint | `checkpoints/understanding/best.pt` | Done (100% game type, 0.13 shift MAE) |
+| v3.2 Agent | `src/aria_v3/understanding_agent.py` | Done (1.0-1.2ms/act, unified scoring + empirical fallbacks) |
 
 ### v3.1 — Three-Layer Agent (Foundation)
 | Component | File | Status |
@@ -142,8 +173,31 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 
 ---
 
+## v3.2 Training Results (30 epochs on 3600 synthetic sequences)
+
+| Metric | Value |
+|--------|-------|
+| Game type accuracy (val) | **100%** |
+| Shift MAE (val) | **0.128** pixels |
+| Shift classification CE (dx/dy) | 0.013 / 0.015 |
+| Frame prediction loss | 0.87 |
+| Entity role BCE | 0.19 |
+| Training time | ~19 min (RTX 4090) |
+| Total params | ~4.3M (578K encoder + 3.2M temporal + 85K decoder + 392K frame predictor) |
+
+**Key architectural insight:** Shift prediction must use CLASSIFICATION (7 bins: {-16,-8,-4,0,+4,+8,+16}) not regression. MSE regression fails because mean shift across randomized action mappings is (0,0), driving predictions to zero. CE classification solved this completely (MAE dropped from 1.5 → 0.13).
+
+---
+
 ## Recent Completions
 
+- **[2026-02-10] v3.2 Post-Mortem**: Documented all v3/v3.1/v3.2 findings. Root cause: visual generalization (CNN) beats frame hashing. See [V3 Post-Mortem](findings/V3-POSTMORTEM.md).
+- **[2026-02-10] StochasticGoose Gap Analysis**: 18/20 vs 1/20 levels. Online CNN P(frame_change) with visual generalization is the winning approach. No pretraining, no entity detection, no LLMs.
+- **[2026-02-10] v3.2 Exploration Fixes**: Empirical change tracking, committed frontier navigation, empirical entity/movement detection. ls20 first ever level (stochastic). Movement map correct within 100 steps.
+- **[2026-02-10] v3.2 Agent Tested on All 3 Games**: vc33=1 level, ls20=0-1 levels (stochastic), ft09=0 levels. 1.0-1.2ms/action.
+- **[2026-02-10] v3.2 Understanding Agent Built**: Unified scoring (replaces 6-mode cascade), TTT integration, 0.66ms/step on realistic frames. Correctly identifies game type from observation.
+- **[2026-02-10] Understanding Model Trained**: 100% game type acc, 0.13 shift MAE. CNN encoder + temporal transformer + shift classification decoder.
+- **[2026-02-10] Synthetic Game Framework**: 3 archetypes (navigation, click, collection), 3600 sequences, 578K transitions with augmentations.
 - **[2026-02-10] Three-Layer Agent Tested on vc33**: 1 level, 4.2ms/act. LLM hallucinated invalid strategy (fixed with validation).
 - **[2026-02-10] Three-Layer Agent Built**: Reactive + Learning + Reasoning oracle integrated.
 - **[2026-02-10] Three-Layer Architecture Design**: Reactive + Learning + Reasoning. LLM oracle for interpretation.
@@ -156,17 +210,27 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 
 ## What's Next
 
-1. **Synthetic game framework** — navigation, click, collection, mixed, push, conditional
-2. **Learned understanding model** — CNN encoder + temporal transformer + decoder heads
-3. **Pretraining pipeline** — data generation, augmentation (color/action/spatial permutations)
-4. **TTT integration** — LoRA adaptation during play
-5. **Evaluation** — all 3 public games + synthetic holdout
-6. **Competition submission** — ARC Prize 2026 (March 25, 2026)
+### v3.2 (Concluded)
+1. ~~Synthetic game framework~~ Done (3 archetypes, 3600 sequences)
+2. ~~Learned understanding model~~ Done (4.3M params, trained 30 epochs)
+3. ~~Pretraining pipeline~~ Done (100% game type, 0.13 shift MAE)
+4. ~~TTT integration~~ Done (LoRA adapts during play, 496+ updates per 5K actions)
+5. ~~v3.2 Agent~~ Done (1.0-1.2ms/act, unified scoring + empirical fallbacks)
+6. ~~Evaluation on 3 games~~ Done (vc33=1 level, ls20=0-1, ft09=0)
+7. ~~Post-mortem~~ Done. See [V3 Post-Mortem](findings/V3-POSTMORTEM.md)
+
+### v4 (Next)
+1. **Design v4 architecture** — Online CNN P(frame_change), StochasticGoose-inspired
+2. **Implement v4 agent** — State graph + online CNN, no pretraining
+3. **Test on 3 games** — Target >3 levels
+4. **Competition submission** — ARC Prize 2026 (March 25, 2026)
 
 ---
 
 ## Links
 - [Competition Rules](reference/COMPETITION-RULES.md) - **READ FIRST** — ground truth
-- [Implementation Plan](current/IMPLEMENTATION-PLAN.md) - v3.2 learned understanding plan
+- [Implementation Plan](current/IMPLEMENTATION-PLAN.md) - v3.2 learned understanding plan (concluded)
 - [Game Mechanics](reference/GAME-MECHANICS.md) - ls20, vc33, ft09 analysis
+- [V3 Post-Mortem](findings/V3-POSTMORTEM.md) - Why v3/v3.1/v3.2 failed, StochasticGoose comparison
 - [ARIA v1 Report](findings/ARIA-V1-REPORT.md) - Why BC/PPO failed
+- [V1 World Model Analysis](findings/V1-WORLD-MODEL-ANALYSIS.md) - World model structural flaws

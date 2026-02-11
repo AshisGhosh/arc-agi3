@@ -214,6 +214,130 @@ Predict next frame given (frame_t, action_t). Available at every step, no labels
 
 ---
 
+## Agent Flow Diagram (Per-Step)
+
+```
+┌────────────────────── AGENT STEP (every action, ~0.5ms) ───────────────┐
+│                                                                         │
+│  Game Engine                                                            │
+│      │                                                                  │
+│      ▼ frame [64,64]                                                    │
+│                                                                         │
+│  ┌─ PHASE 1: Process Frame ────────────────────────────────────────┐    │
+│  │  frame_hash = hash_frame(frame)              ~0.02ms            │    │
+│  │  regions = segment(frame)                    ~0.2ms             │    │
+│  │  state_graph.register_state(hash, n_actions) ~0.01ms            │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│  ┌─ PHASE 2: Update from Previous Step ────────────────────────────┐    │
+│  │  (skip on first step)                                           │    │
+│  │                                                                 │    │
+│  │  state_graph.update(prev_hash, action, hash, changed)           │    │
+│  │       │                                                         │    │
+│  │       ▼                                                         │    │
+│  │  ttt.observe(prev_frame, action_type, frame)    ~0.1ms avg     │    │
+│  │       │                                                         │    │
+│  │       ▼                                                         │    │
+│  │  buffer.append(prev_frame, action, frame)                       │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│  ┌─ PHASE 3: Maybe Update Understanding ───────────────────────────┐    │
+│  │  Schedule: step 10 → 30 → 100 → 200 → 300 → ...               │    │
+│  │                                                                 │    │
+│  │  if step_count == scheduled_step:                               │    │
+│  │    predictions = model.forward(buffer[-100:])    ~15ms          │    │
+│  │    understanding = derive(predictions)                          │    │
+│  │      → game_type, movement_map, player_color,                   │    │
+│  │        wall_colors, collectible_colors, confidence              │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│  ┌─ PHASE 4: Score & Select (unified — understanding ALWAYS used) ┐    │
+│  │                                                                 │    │
+│  │  For EVERY candidate action, compute a single score:            │    │
+│  │                                                                 │    │
+│  │  ┌─────────────────────────────────────────────────────────┐    │    │
+│  │  │  score = 0                                              │    │    │
+│  │  │                                                         │    │    │
+│  │  │  + 5.0  if UNTESTED in graph (novelty)                  │    │    │
+│  │  │  SKIP   if DEAD in graph (exclude entirely)             │    │    │
+│  │  │                                                         │    │    │
+│  │  │  + 3.0 × change_prob      (understanding)              │    │    │
+│  │  │  - 2.0 × blocked_prob     (understanding)              │    │    │
+│  │  │                                                         │    │    │
+│  │  │  + 0.3 × dist_reduction × confidence  (pathfinding)    │    │    │
+│  │  │    (for simple actions with known movement_map)         │    │    │
+│  │  │                                                         │    │    │
+│  │  │  FOR CLICKS:                                            │    │    │
+│  │  │  - 3.0  if wall color      (entity roles)              │    │    │
+│  │  │  - 2.0  if background                                  │    │    │
+│  │  │  + 4.0  if collectible                                  │    │    │
+│  │  │  + 2.0  if un-tried region  (click novelty)            │    │    │
+│  │  │  + 0.5  if small region     (likely interactive)        │    │    │
+│  │  └─────────────────────────────────────────────────────────┘    │    │
+│  │                                                                 │    │
+│  │  Pick highest-scoring action (random among top 10% ties)        │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│      │ (action_type, x, y)                                              │
+│      ▼                                                                  │
+│  Game Engine                                                            │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key design: no fallback modes.** Understanding signals (change_prob, entity roles,
+movement_map) are ALWAYS mixed into the score, even at step 0 when they're default 0.5.
+Graph novelty and dead-exclusion are also always applied. Every action decision uses
+all available information.
+
+---
+
+## Understanding Evolution Over Time
+
+```
+Step 0              Step 10             Step 30             Step 100+
+─────────────────────────────────────────────────────────────────────────
+
+Confidence: 0.0     Confidence: ~0.2    Confidence: ~0.5    Confidence: ~0.8+
+
+Game Type:          Game Type:          Game Type:          Game Type:
+  ???                 navigation?         navigation ✓        navigation ✓✓
+
+Movement Map:       Movement Map:       Movement Map:       Movement Map:
+  {}                  {1:(0,-4)?}         {1:(0,-4),          {1:(0,-4),
+                                           2:(0,+4),           2:(0,+4),
+                                           3:(-4,0),           3:(-4,0),
+                                           4:(+4,0)}           4:(+4,0)} ✓
+
+Entity Roles:       Entity Roles:       Entity Roles:       Entity Roles:
+  all unknown         bg=color 0?         player=color 7      player=7 ✓
+                                          wall=color 3        wall=3 ✓
+                                          bg=color 0          collect=9 ✓
+
+Strategy:           Strategy:           Strategy:           Strategy:
+  Pure random         Random +            Graph explore +     Pathfind to
+  exploration         graph explore       guided random       collectibles
+                                                             with movement_map
+
+Actions/sec:        Actions/sec:        Actions/sec:        Actions/sec:
+  ~1000               ~1000               ~900                ~800
+  (all random)        (mostly random)     (some guided)       (mostly planned)
+```
+
+---
+
+## Timing Budget
+
+| Operation | Per-step | Notes |
+|-----------|----------|-------|
+| Segment + hash | ~0.2ms | CCL on 16 colors (real games ~8 regions) |
+| State graph | ~0.01ms | Dict lookups |
+| TTT observe | ~0.1ms avg | 1ms every 10 steps |
+| Understanding | ~0.15ms avg | 15ms every 100 steps |
+| Action scoring | ~0.05ms | Score all candidates, pick best |
+| **Total** | **~0.52ms** | Measured on RTX 4090 with realistic frames |
+
+---
+
 ## Implementation Order
 
 ### Stage 1: Synthetic Game Framework (3-4 days)
