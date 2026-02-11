@@ -1,18 +1,40 @@
 # Project Progress
 
 ## Current State
-**Phase:** v3.2 concluded → v4 pivot pending
+**Phase:** v4 — Online P(frame_change) CNN (StochasticGoose-inspired)
 **Branch:** main
-**Status:** v3.2 post-mortem complete. Pivoting to v4 (online P(frame_change) CNN, StochasticGoose-inspired).
+**Status:** v4 agent implemented and tested. 2 levels on vc33 (best ever). CNN-guided action selection.
 
 ## Immediate Next Step
-**v4 Implementation — Online P(frame_change) CNN:**
-1. Design v4 architecture (online CNN, no pretraining, visual generalization)
-2. Implement v4 agent with state graph + online CNN
-3. Test on ls20, vc33, ft09
-4. Target: >3 levels across 3 games
+**Optimize v4 for more levels:**
+1. Improve ls20 — CNN can't differentiate productive vs unproductive movement (99% frame change rate)
+2. Improve ft09 — high game-over rate (299 resets in 10K), need better click targeting
+3. Speed optimization — currently 2.6-2.9ms/action, target <1.5ms
+4. Try larger action budgets (3 min time budget allows ~70K actions)
 
-**Why pivot:** v3.2 post-mortem identified fundamental flaws. See [V3 Post-Mortem](findings/V3-POSTMORTEM.md).
+---
+
+## v4 Results (Online P(frame_change) CNN)
+
+### v4 Agent (CNN-guided stochastic sampling, no pretraining)
+| Game | Actions | Levels | Speed | Notes |
+|------|---------|--------|-------|-------|
+| **vc33** | 40K | **2** | 2.9ms/act | Level 1 @ action 86, Level 2 @ action 4462. Best ever. |
+| ls20 | 40K | 0 | 2.6ms/act | 99% frame change rate — CNN can't differentiate movements |
+| ft09 | 10K | 0 | 3.5ms/act | 299 resets, 1715 unique experiences. High game-over rate |
+
+**Key improvements over v3.2:**
+- vc33: 2 levels (was 1). CNN learns which regions to click.
+- CNN-guided action selection replaces graph-based exploration
+- Simpler architecture: no pretraining, no entity detection, no game type classification
+- Clean online learning: model resets per level, learns from scratch
+
+**Architecture:** `src/v4/` — [V4 Architecture](current/V4-ARCHITECTURE.md)
+- 1.1M param CNN (16→32→64→128→256 backbone)
+- Action head: 5 logits for simple actions 1-5
+- Coordinate head: 64x64 spatial map for click positions
+- Online training: BCE loss + entropy regularization, every 5 actions
+- Hash-deduped experience buffer (200K max)
 
 ---
 
@@ -134,7 +156,14 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 
 ## Code Status
 
-### v3.2 — Learned Understanding (Active Development)
+### v4 — Online P(frame_change) CNN (Active Development)
+| Component | File | Status |
+|-----------|------|--------|
+| CNN Model | `src/v4/model.py` | Done (1.1M params, 0.28ms forward) |
+| Agent | `src/v4/agent.py` | Done (CNN-guided sampling, 2.6-3.5ms/act) |
+| Experience Buffer | `src/v4/agent.py` | Done (hash-deduped, 200K max) |
+
+### v3.2 — Learned Understanding (Concluded)
 | Component | File | Status |
 |-----------|------|--------|
 | Synthetic Game Framework | `src/aria_v3/synthetic_games/` | Done (3 archetypes, 3600 sequences) |
@@ -191,6 +220,8 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 
 ## Recent Completions
 
+- **[2026-02-10] v4 Agent First Results**: vc33=2 levels (best ever), ls20=0, ft09=0. 2.6-3.5ms/action. CNN-guided action selection.
+- **[2026-02-10] v4 Agent Implemented**: Online P(frame_change) CNN, StochasticGoose-inspired. No pretraining, no state graph for action selection.
 - **[2026-02-10] v3.2 Post-Mortem**: Documented all v3/v3.1/v3.2 findings. Root cause: visual generalization (CNN) beats frame hashing. See [V3 Post-Mortem](findings/V3-POSTMORTEM.md).
 - **[2026-02-10] StochasticGoose Gap Analysis**: 18/20 vs 1/20 levels. Online CNN P(frame_change) with visual generalization is the winning approach. No pretraining, no entity detection, no LLMs.
 - **[2026-02-10] v3.2 Exploration Fixes**: Empirical change tracking, committed frontier navigation, empirical entity/movement detection. ls20 first ever level (stochastic). Movement map correct within 100 steps.
@@ -219,16 +250,18 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 6. ~~Evaluation on 3 games~~ Done (vc33=1 level, ls20=0-1, ft09=0)
 7. ~~Post-mortem~~ Done. See [V3 Post-Mortem](findings/V3-POSTMORTEM.md)
 
-### v4 (Next)
-1. **Design v4 architecture** — Online CNN P(frame_change), StochasticGoose-inspired
-2. **Implement v4 agent** — State graph + online CNN, no pretraining
-3. **Test on 3 games** — Target >3 levels
-4. **Competition submission** — ARC Prize 2026 (March 25, 2026)
+### v4 (Active)
+1. ~~Design v4 architecture~~ Done. See [V4 Architecture](current/V4-ARCHITECTURE.md)
+2. ~~Implement v4 agent~~ Done. `src/v4/agent.py`, `src/v4/model.py`
+3. ~~First test on 3 games~~ Done. vc33=2 levels, ls20=0, ft09=0
+4. **Optimize for more levels** — ls20 navigation, ft09 game-over rate, speed
+5. **Competition submission** — ARC Prize 2026 (March 25, 2026)
 
 ---
 
 ## Links
 - [Competition Rules](reference/COMPETITION-RULES.md) - **READ FIRST** — ground truth
+- [V4 Architecture](current/V4-ARCHITECTURE.md) - v4 online P(frame_change) CNN (active)
 - [Implementation Plan](current/IMPLEMENTATION-PLAN.md) - v3.2 learned understanding plan (concluded)
 - [Game Mechanics](reference/GAME-MECHANICS.md) - ls20, vc33, ft09 analysis
 - [V3 Post-Mortem](findings/V3-POSTMORTEM.md) - Why v3/v3.1/v3.2 failed, StochasticGoose comparison
