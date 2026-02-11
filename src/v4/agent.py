@@ -132,20 +132,27 @@ class V4Agent:
         self.prev_click_y: int = -1
         self.prev_click_x: int = -1
 
+        # State novelty tracking
+        self.seen_states: set[str] = set()
+
         # Stats
         self.step_count = 0
         self.level_step_count = 0
         self.frame_changes = 0
+        self.novel_states = 0
         self.train_steps = 0
         self.levels_completed = 0
         self.cnn_actions = 0
         self.random_actions = 0
 
+        # Segmentation cache
+        self._seg_cache_hash: str | None = None
+        self._seg_cache_regions: list | None = None
+
         # Hyperparameters
-        self.train_every = 5
+        self.train_every = 10
         self.batch_size = 64
-        self.entropy_coeff_action = 1e-4
-        self.entropy_coeff_coord = 1e-5
+        self.entropy_coeff = 1e-4
 
     def _init_model(self) -> None:
         self.model = FrameChangeCNN().to(self.device)
@@ -172,22 +179,34 @@ class V4Agent:
         # Update from previous step
         if self.prev_frame is not None:
             frame_changed = not np.array_equal(self.prev_frame, frame)
+            state_novel = frame_hash not in self.seen_states
             if frame_changed:
                 self.frame_changes += 1
+            if state_novel:
+                self.novel_states += 1
+            # Target: frame changed AND resulting state is novel
+            # This fixes: ls20 (99% → ~14%), ft09 (game-over → known start → 0)
+            target = 1.0 if (frame_changed and state_novel) else 0.0
             self.buffer.add(
                 self.prev_frame, self.prev_hash,
                 self.prev_action_type, self.prev_click_y, self.prev_click_x,
-                frame_changed,
+                target,
             )
+        self.seen_states.add(frame_hash)
 
         # Maybe train
         if self.level_step_count % self.train_every == 0 and len(self.buffer) >= self.batch_size:
             self._train_step()
 
-        # Segment frame once (only if we have click actions)
+        # Segment frame with caching (only if we have click actions)
         regions = None
         if self.has_click:
-            regions = self.frame_processor.segment(frame)
+            if frame_hash == self._seg_cache_hash:
+                regions = self._seg_cache_regions
+            else:
+                regions = self.frame_processor.segment(frame)
+                self._seg_cache_hash = frame_hash
+                self._seg_cache_regions = regions
 
         # Select action
         action_type, x, y = self._select_action(frame, regions)
@@ -252,20 +271,17 @@ class V4Agent:
             return
         loss = loss / count
 
-        # Entropy regularization
-        action_probs = torch.sigmoid(action_logits)
-        action_entropy = -(
-            action_probs * torch.log(action_probs.clamp(min=1e-8))
-            + (1 - action_probs) * torch.log((1 - action_probs).clamp(min=1e-8))
-        ).mean()
-
-        coord_probs = torch.sigmoid(coord_logits)
-        coord_entropy = -(
-            coord_probs * torch.log(coord_probs.clamp(min=1e-8))
-            + (1 - coord_probs) * torch.log((1 - coord_probs).clamp(min=1e-8))
-        ).mean()
-
-        loss = loss - self.entropy_coeff_action * action_entropy - self.entropy_coeff_coord * coord_entropy
+        # Entropy regularization on taken action logits only (faster than full output)
+        all_taken = []
+        if simple_mask.any():
+            all_taken.append(taken)
+        if click_mask.any():
+            all_taken.append(pixel_logits)
+        if all_taken:
+            taken_cat = torch.cat(all_taken)
+            p = torch.sigmoid(taken_cat)
+            entropy = -(p * torch.log(p.clamp(min=1e-8)) + (1 - p) * torch.log((1 - p).clamp(min=1e-8))).mean()
+            loss = loss - self.entropy_coeff * entropy
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -288,12 +304,10 @@ class V4Agent:
 
         self.cnn_actions += 1
 
-        # Get CNN predictions
+        # Get CNN predictions (stay in train mode, no_grad suffices)
         frame_t = torch.from_numpy(frame).unsqueeze(0).to(self.device)
         frame_oh = frame_to_onehot(frame_t)
-        self.model.eval()
         action_logits, coord_logits = self.model(frame_oh)
-        self.model.train()
 
         action_probs = torch.sigmoid(action_logits[0]).cpu().numpy()  # [5]
         coord_probs = torch.sigmoid(coord_logits[0]).cpu().numpy()  # [64, 64]
@@ -344,9 +358,12 @@ class V4Agent:
         """Reset for a new level."""
         self._init_model()
         self.buffer.clear()
+        self.seen_states.clear()
         self.prev_frame = None
         self.prev_hash = None
         self.prev_action_type = -1
+        self._seg_cache_hash = None
+        self._seg_cache_regions = None
         self.level_step_count = 0
         self.levels_completed += 1
 
@@ -354,6 +371,8 @@ class V4Agent:
         return {
             "step": self.step_count,
             "frame_changes": self.frame_changes,
+            "novel_states": self.novel_states,
+            "seen_states": len(self.seen_states),
             "levels": self.levels_completed,
             "buffer": len(self.buffer),
             "train_steps": self.train_steps,
@@ -452,13 +471,14 @@ def run_agent(
             stats = agent.get_stats()
             ms = elapsed * 1000 / max(action_count, 1)
             chg_rate = stats['frame_changes'] / max(action_count, 1) * 100
+            novel_rate = stats['novel_states'] / max(action_count, 1) * 100
             print(
                 f"  [{action_count:>6d}] "
-                f"changes={stats['frame_changes']:>5d} ({chg_rate:.0f}%) "
+                f"novel={stats['novel_states']:>5d} ({novel_rate:.0f}%) "
+                f"chg={stats['frame_changes']:>5d} ({chg_rate:.0f}%) "
+                f"seen={stats['seen_states']:>5d} "
                 f"buf={stats['buffer']:>6d} "
-                f"train={stats['train_steps']:>4d} "
-                f"cnn={stats['cnn_actions']:>5d} "
-                f"rnd={stats['random_actions']:>3d} | "
+                f"train={stats['train_steps']:>4d} | "
                 f"{ms:.1f}ms/act"
             )
 
@@ -475,9 +495,10 @@ def run_agent(
         print(f"Levels completed: {levels_completed}")
         print(f"Time: {duration:.1f}s ({duration/max(action_count,1)*1000:.1f}ms/action)")
         print(f"Frame changes: {stats['frame_changes']} ({stats['frame_changes']/max(action_count,1)*100:.0f}%)")
+        print(f"Novel states: {stats['novel_states']} ({stats['novel_states']/max(action_count,1)*100:.0f}%)")
+        print(f"Unique states seen: {stats['seen_states']}")
         print(f"Buffer: {stats['buffer']} unique experiences")
         print(f"Training: {stats['train_steps']} steps")
-        print(f"CNN-guided: {stats['cnn_actions']}, Random: {stats['random_actions']}")
 
         print(f"\n{'='*60}")
         print("Scorecard")
