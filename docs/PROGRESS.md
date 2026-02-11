@@ -37,11 +37,12 @@
 | ft09 | 10K | 0 | 3.5ms/act | 299 resets, 1715 unique experiences. High game-over rate |
 
 **Architecture:** `src/v4/` — [V4 Architecture](current/V4-ARCHITECTURE.md)
-- 1.1M param CNN (16→32→64→128→256 backbone)
-- Action head: 5 logits for simple actions 1-5
+- 5.3M param CNN (16→32→64→128→256 backbone, spatial action head)
+- Action head: flattened 16384 spatial features → 256 → 5 logits (StochasticGoose-inspired)
 - Coordinate head: 64x64 spatial map for click positions
-- Online training: BCE loss + entropy regularization, every 5 actions
+- Online training: BCE loss + entropy regularization, every 10 actions
 - Hash-deduped experience buffer (200K max), state novelty tracking
+- Random restart: if no novel state in 5000 steps, reset CNN (keep seen_states)
 
 ---
 
@@ -166,10 +167,11 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 ### v4 — Online P(state_novelty) CNN (Active Development)
 | Component | File | Status |
 |-----------|------|--------|
-| CNN Model | `src/v4/model.py` | Done (1.1M params, 0.28ms forward) |
-| Agent | `src/v4/agent.py` | Done (CNN-guided + novelty signal, 3.3-4.6ms/act) |
+| CNN Model | `src/v4/model.py` | Done (5.3M params, spatial action head, 0.32ms forward) |
+| Agent | `src/v4/agent.py` | Done (CNN-guided + novelty + restart, 2.3-3.4ms/act) |
 | Experience Buffer | `src/v4/agent.py` | Done (hash-deduped, 200K max, novelty targets) |
 | State Novelty | `src/v4/agent.py` | Done (seen_states tracking, target = changed AND novel) |
+| Random Restart | `src/v4/agent.py` | Done (5000 step threshold, max 3 per level) |
 
 ### v3.2 — Learned Understanding (Concluded)
 | Component | File | Status |

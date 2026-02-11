@@ -144,6 +144,12 @@ class V4Agent:
         self.levels_completed = 0
         self.cnn_actions = 0
         self.random_actions = 0
+        self.restarts = 0
+
+        # Random restart tracking
+        self.steps_since_novel = 0
+        self.restart_threshold = 5000  # restart if no novel state in this many steps
+        self.max_restarts_per_level = 3
 
         # Segmentation cache
         self._seg_cache_hash: str | None = None
@@ -184,8 +190,10 @@ class V4Agent:
                 self.frame_changes += 1
             if state_novel:
                 self.novel_states += 1
+                self.steps_since_novel = 0
+            else:
+                self.steps_since_novel += 1
             # Target: frame changed AND resulting state is novel
-            # This fixes: ls20 (99% → ~14%), ft09 (game-over → known start → 0)
             target = 1.0 if (frame_changed and state_novel) else 0.0
             self.buffer.add(
                 self.prev_frame, self.prev_hash,
@@ -197,6 +205,20 @@ class V4Agent:
         # Maybe train
         if self.level_step_count % self.train_every == 0 and len(self.buffer) >= self.batch_size:
             self._train_step()
+
+        # Random restart: if stuck with no novel states, reset model
+        level_restarts = getattr(self, '_level_restarts', 0)
+        if (self.steps_since_novel >= self.restart_threshold
+                and level_restarts < self.max_restarts_per_level
+                and len(self.buffer) >= self.batch_size):
+            self._init_model()
+            self.buffer.clear()
+            self._seg_cache_hash = None
+            self._seg_cache_regions = None
+            self._level_restarts = level_restarts + 1
+            self.restarts += 1
+            self.steps_since_novel = 0
+            # Keep seen_states — don't re-explore known territory
 
         # Segment frame with caching (only if we have click actions)
         regions = None
@@ -365,6 +387,8 @@ class V4Agent:
         self._seg_cache_hash = None
         self._seg_cache_regions = None
         self.level_step_count = 0
+        self.steps_since_novel = 0
+        self._level_restarts = 0
         self.levels_completed += 1
 
     def get_stats(self) -> dict:
@@ -376,8 +400,7 @@ class V4Agent:
             "levels": self.levels_completed,
             "buffer": len(self.buffer),
             "train_steps": self.train_steps,
-            "cnn_actions": self.cnn_actions,
-            "random_actions": self.random_actions,
+            "restarts": self.restarts,
         }
 
 
@@ -478,7 +501,7 @@ def run_agent(
                 f"chg={stats['frame_changes']:>5d} ({chg_rate:.0f}%) "
                 f"seen={stats['seen_states']:>5d} "
                 f"buf={stats['buffer']:>6d} "
-                f"train={stats['train_steps']:>4d} | "
+                f"rst={stats['restarts']:>2d} | "
                 f"{ms:.1f}ms/act"
             )
 
@@ -499,6 +522,7 @@ def run_agent(
         print(f"Unique states seen: {stats['seen_states']}")
         print(f"Buffer: {stats['buffer']} unique experiences")
         print(f"Training: {stats['train_steps']} steps")
+        print(f"Restarts: {stats['restarts']}")
 
         print(f"\n{'='*60}")
         print("Scorecard")

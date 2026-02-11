@@ -45,13 +45,14 @@ class FrameChangeCNN(nn.Module):
         )
 
         # Action head: predict P(frame_change) for actions 1-5
+        # Uses flattened spatial features (16384) for spatial awareness
+        # (StochasticGoose uses 65536; our backbone gives 256×8×8=16384)
         self.action_head = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),  # → [256, 1, 1]
-            nn.Flatten(),  # → [256]
-            nn.Linear(256, 128),
+            nn.Flatten(),  # → [16384]
+            nn.Linear(256 * 8 * 8, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.2),
-            nn.Linear(128, 5),  # 5 simple actions
+            nn.Linear(256, 5),  # 5 simple actions
         )
 
         # Coordinate head: predict P(frame_change) for click at each pixel
