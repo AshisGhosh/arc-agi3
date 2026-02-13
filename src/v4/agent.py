@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-v4 Agent: Hybrid graph BFS + CNN P(state_novelty).
+v4 Agent: CNN P(state_novelty) with graph-assisted exploration.
 
 Strategy:
-  - State graph for systematic simple action exploration (BFS to frontier)
-  - CNN for click target prediction (top-K heatmap pixels)
-  - Graph handles navigation efficiently, CNN handles visual prediction
-  - Committed path navigation (follow full BFS path, not just first step)
+  - Graph BFS for systematic nav exploration (fast, efficient)
+  - CNN for click/mixed games and when graph BFS exhausts frontier
+  - CNN always trains (even during graph BFS) — learns from all exploration data
+  - Graph tracks dead-ends and game-overs for CNN action filtering
 
 Speed optimizations:
   - Pre-allocated contiguous frame buffer (fast sampling)
@@ -212,10 +212,11 @@ class StateGraph:
 # ---------------------------------------------------------------------------
 
 class V4Agent:
-    """Hybrid graph BFS + CNN P(novelty) agent."""
+    """CNN P(novelty) agent with graph-assisted exploration."""
 
-    def __init__(self, device: str = "cuda", model_size: str = "small",
-                 persist_model: bool = False, train_every: int = 20):
+    def __init__(self, device: str = "cuda", model_size: str = "goose",
+                 persist_model: bool = False, train_every: int = 20,
+                 temperature: float = 0.5):
         self.device = device
         self.model_size = model_size
         self.persist_model = persist_model
@@ -237,9 +238,6 @@ class V4Agent:
         self.prev_simple_idx: int = -1
         self.prev_click_y: int = -1
         self.prev_click_x: int = -1
-
-        # Committed path queue (from graph BFS)
-        self._path_queue: deque[int] = deque()
 
         # State tracking (visit counts for continuous novelty targets)
         self.seen_states: dict[int, int] = {}
@@ -271,6 +269,7 @@ class V4Agent:
         # Hyperparameters
         self.train_every = train_every
         self.batch_size = 32
+        self.temperature = temperature
         self.action_entropy_coeff = 1e-4
         self.coord_entropy_coeff = 1e-5
 
@@ -342,11 +341,6 @@ class V4Agent:
                 self.graph.update(self.prev_hash, self.prev_simple_idx,
                                   frame_hash, frame_changed)
 
-            # If frame changed unexpectedly while following committed path,
-            # invalidate the path (we're at a different state than expected)
-            if frame_changed and self._path_queue:
-                self._path_queue.clear()
-
             # CNN target: continuous novelty signal
             # First visit: 1.0, second: 0.5, third: 0.33, etc.
             # No frame change: 0.0
@@ -367,16 +361,14 @@ class V4Agent:
                 and len(self.buffer) >= self.batch_size):
             self._init_model()
             self.buffer.clear()
-            self._path_queue.clear()
             # Keep graph and tried_clicks — they're ground truth
             self._level_restarts += 1
             self.restarts += 1
             self.steps_since_novel = 0
 
-        # --- Train CNN when it's being used (skip when graph BFS handles everything) ---
+        # --- Train CNN ---
         if (self.level_step_count % self.train_every == 0
-                and len(self.buffer) >= self.batch_size
-                and self.cnn_actions > 0):
+                and len(self.buffer) >= self.batch_size):
             self._train_step()
 
         # --- Action selection ---
@@ -394,22 +386,19 @@ class V4Agent:
 
     def _select_action(self, frame: np.ndarray, frame_hash: int,
                         ) -> tuple[int, int | None, int | None, int]:
-        """Action selection: graph BFS for nav, CNN for click/mixed.
+        """Action selection: graph BFS for nav systematic exploration, CNN for all else.
 
-        Action pruning filters useless types from CNN candidates.
+        Key difference from before: CNN always trains (no cnn_actions > 0 gate),
+        so it learns from graph BFS exploration data. When graph exhausts frontier,
+        the trained CNN takes over seamlessly.
         """
         # Effective action availability (after pruning useless types)
         effective_simple = [a for a in self.available_simple
                            if a not in self._pruned_actions]
         effective_click = self.has_click and 6 not in self._pruned_actions
 
-        # --- Nav-only (or effectively nav-only): graph BFS ---
+        # --- Nav-only: graph BFS for systematic exploration ---
         if not effective_click and effective_simple:
-            # Follow committed path
-            if self._path_queue:
-                idx = self._path_queue.popleft()
-                self.graph_actions += 1
-                return self.available_simple[idx], None, None, idx
             # Untested simple action at current state
             untested = self.graph.get_untested(frame_hash)
             if untested is not None:
@@ -418,11 +407,9 @@ class V4Agent:
             # BFS to nearest frontier
             path = self.graph.bfs_to_frontier(frame_hash)
             if path and len(path) > 0:
-                idx = path[0]
-                for step_idx in path[1:]:
-                    self._path_queue.append(step_idx)
                 self.graph_actions += 1
-                return self.available_simple[idx], None, None, idx
+                return self.available_simple[path[0]], None, None, path[0]
+            # Graph exhausted — fall through to CNN
             return self._cnn_select(frame, frame_hash)
 
         # --- Click-only or Mixed: CNN drives everything ---
@@ -438,6 +425,13 @@ class V4Agent:
             self.random_actions += 1
             return self._random_action()
 
+        # Epsilon-greedy exploration: prevents CNN from locking into bad patterns
+        # Critical for large models (goose) on mixed-action games
+        epsilon = max(0.05, 0.2 * (0.5 ** (self.train_steps / 200)))
+        if np.random.random() < epsilon:
+            self.random_actions += 1
+            return self._random_action()
+
         self.cnn_actions += 1
 
         # Get CNN predictions (pre-allocated one-hot for speed)
@@ -447,11 +441,12 @@ class V4Agent:
         action_logits, coord_logits = self.model(
             self._onehot_inf, need_coord=(self.has_click
                                           and 6 not in self._pruned_actions))
-        action_probs = torch.sigmoid(action_logits[0]).cpu().numpy()
-        coord_probs = (torch.sigmoid(coord_logits[0]).cpu().numpy()
-                       if coord_logits is not None else None)
+        action_logits_np = action_logits[0].cpu().numpy()
+        coord_logits_np = (coord_logits[0].cpu().numpy()
+                          if coord_logits is not None else None)
 
         candidates = []
+        logits = []
 
         # Simple actions (skip pruned and graph-dead)
         for i, game_action in enumerate(self.available_simple):
@@ -460,30 +455,34 @@ class V4Agent:
             node = self.graph.nodes.get(frame_hash)
             if node and i < len(node.edges) and node.edges[i] == _DEAD:
                 continue
-            score = float(action_probs[i]) if i < 5 else 0.5
-            candidates.append((game_action, None, None, i, max(score, 0.01)))
+            candidates.append((game_action, None, None, i))
+            logits.append(float(action_logits_np[i]) if i < 5 else 0.0)
 
-        # Click actions: top-K pixels from CNN heatmap (replaces CCL regions)
+        # Click actions: top-K pixels from CNN heatmap
         if (self.has_click and 6 not in self._pruned_actions
-                and coord_probs is not None):
-            flat = coord_probs.ravel()
+                and coord_logits_np is not None):
+            flat = coord_logits_np.ravel()
             k = min(16, flat.shape[0])
             top_idx = np.argpartition(flat, -k)[-k:]
             for idx in top_idx:
                 cy, cx = divmod(int(idx), 64)
-                candidates.append((6, int(cx), int(cy), -1, max(float(flat[idx]), 0.01)))
-            # Random click for exploration
+                candidates.append((6, int(cx), int(cy), -1))
+                logits.append(float(flat[idx]))
+            # Random click for exploration (low logit)
             ry, rx = np.random.randint(0, 64, size=2)
-            candidates.append((6, int(rx), int(ry), -1, 0.02))
+            candidates.append((6, int(rx), int(ry), -1))
+            logits.append(float(flat.min()) - 2.0)
 
         if not candidates:
             self.random_actions += 1
             return self._random_action()
 
-        # Stochastic sampling
-        scores = np.array([c[4] for c in candidates], dtype=np.float64)
-        scores /= scores.sum()
-        idx = np.random.choice(len(candidates), p=scores)
+        # Softmax sampling with temperature
+        logits_arr = np.array(logits, dtype=np.float64) / self.temperature
+        logits_arr -= logits_arr.max()  # numerical stability
+        exp_l = np.exp(logits_arr)
+        probs = exp_l / exp_l.sum()
+        idx = np.random.choice(len(candidates), p=probs)
         c = candidates[idx]
         return c[0], c[1], c[2], c[3]
 
@@ -580,7 +579,6 @@ class V4Agent:
             self.buffer.clear()
         self.graph.reset()
         self.seen_states.clear()
-        self._path_queue.clear()
         self.prev_frame = None
         self.prev_hash = None
         self.prev_simple_idx = -1
@@ -619,9 +617,10 @@ def run_agent(
     max_actions: int = 200_000,
     verbose: bool = True,
     device: str = "cuda",
-    model_size: str = "small",
+    model_size: str = "goose",
     persist_model: bool = False,
     train_every: int = 20,
+    temperature: float = 0.5,
 ):
     from dotenv import load_dotenv
     load_dotenv()
@@ -638,14 +637,16 @@ def run_agent(
         sys.exit(1)
 
     agent = V4Agent(device=device, model_size=model_size,
-                    persist_model=persist_model, train_every=train_every)
+                    persist_model=persist_model, train_every=train_every,
+                    temperature=temperature)
 
     if verbose:
         print(f"\n{'='*60}")
-        print(f"v4 Agent — Hybrid Graph BFS + CNN P(novelty)")
+        print(f"v4 Agent — CNN P(novelty) + graph-assisted exploration")
         print(f"Game: {game_id} | Max actions: {max_actions}")
         print(f"Model: {model_size} ({agent.model.count_params():,} params)"
-              f" | persist={persist_model} | train_every={train_every}")
+              f" | persist={persist_model} | train_every={train_every}"
+              f" | temp={temperature}")
         print(f"{'='*60}")
 
     arc = arc_agi.Arcade()
@@ -758,17 +759,19 @@ def run_agent(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="v4 Hybrid Graph BFS + CNN P(novelty) Agent")
+        description="v4 CNN P(novelty) Agent")
     parser.add_argument("--game", "-g", default="ls20")
     parser.add_argument("--max-actions", "-m", type=int, default=200_000)
     parser.add_argument("--quiet", "-q", action="store_true")
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--model-size", "-s", default="small",
+    parser.add_argument("--model-size", "-s", default="goose",
                         choices=["small", "medium", "large", "goose"])
     parser.add_argument("--persist-model", action="store_true",
                         help="Keep CNN across levels (don't reinitialize)")
     parser.add_argument("--train-every", type=int, default=20,
                         help="Train CNN every N steps (default: 20)")
+    parser.add_argument("--temperature", "-t", type=float, default=0.5,
+                        help="Softmax temperature for action selection (lower=sharper)")
     args = parser.parse_args()
 
     run_agent(
@@ -779,6 +782,7 @@ def main():
         model_size=args.model_size,
         persist_model=args.persist_model,
         train_every=args.train_every,
+        temperature=args.temperature,
     )
 
 

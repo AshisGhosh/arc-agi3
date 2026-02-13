@@ -1,38 +1,50 @@
 # Project Progress
 
 ## Current State
-**Phase:** v4.1 — Online P(state_novelty) CNN (StochasticGoose-inspired)
+**Phase:** v4.2 — Goose model + softmax temperature + epsilon-greedy
 **Branch:** main
-**Status:** Speed optimized. **5 levels across 3 games** (vc33=2, ls20=1, ft09=2). Best ever.
+**Status:** **6 levels across 3 games** (vc33=3, ls20=1, ft09=2). Best ever.
 
 ## Immediate Next Step
-**Exploration strategy improvements:**
-1. vc33 level 3+ blocked — CNN exploration hits ceiling after 10K+ actions
-2. Ablation study complete: speed > model sophistication (see [V4 Ablation](findings/V4-ABLATION-STUDY.md))
-3. Current speed: 0.3-1.4ms/act (120K actions/game budget achieved)
-4. Next: Better exploration strategy or richer signal than P(state_novelty)
+**Further optimization or scaling:**
+1. vc33 broke L3 barrier with goose+temp=0.5 — investigate L4+
+2. ft09 is RNG-sensitive (0-2 levels without epsilon, 2 reliably with)
+3. ls20 L2 needs 170K+ actions — may need smarter graph-to-CNN handoff
+4. Competition submission prep (March 25, 2026)
 
 ---
 
 ## v4 Results (Online P(state_novelty) CNN)
 
-### v4.1 Agent — Optimized (CNN-guided, P(novel_state))
+### v4.2 Agent — Goose + Temperature + Epsilon (best config)
+| Game | Actions | Levels | Speed | Notes |
+|------|---------|--------|-------|-------|
+| **vc33** | 200K | **3** | 1.6ms/act | L1 @ 988, L2 @ 1,487, L3 @ 12,268. Score 0.50. |
+| **ls20** | 200K | **1** | 0.8ms/act | L1 @ 27,356. Graph BFS dominates. |
+| **ft09** | 200K | **2** | 1.8ms/act | L1 @ 5,639, L2 @ 65,598. Score 0.046. |
+
+**Total: 6 levels (best ever)**
+
+**Key changes from v4.1:**
+- **Goose model (34M):** Larger capacity enables vc33 L3 breakthrough
+- **Softmax temperature (0.5):** Replaces sigmoid proportional sampling. 13x faster vc33 L1.
+- **Epsilon-greedy (20%→5% decay):** Prevents goose model overfitting on small datasets (ft09 fix)
+- **CNN always trains:** Removed `cnn_actions > 0` gate. CNN learns from graph BFS data.
+- **Graph BFS for nav-only:** Single-step re-evaluation (no committed paths).
+
+### v4.1 Agent — Speed Optimized (previous best)
 | Game | Actions | Levels | Speed | Notes |
 |------|---------|--------|-------|-------|
 | **vc33** | 11K | **2** | 1.4ms/act | Level 1 @ 84, Level 2 @ 10,693. Stuck on L3. |
 | **ls20** | 38K | **1** | 0.3ms/act | Level 1 @ 37,844. Novel rate 15% vs 99% frame change. |
 | **ft09** | 9K | **2** | 1.3ms/act | Level 1 @ 5,326, Level 2 @ 8,770. CNN avoids game-over. |
 
-**Total: 5 levels (best ever)**
+**Total: 5 levels**
 
 **Key insights:**
 - **Novelty signal >> frame_change:** Target = `frame_changed AND state_novel`
-  - ls20: 99% uninformative → 15% meaningful. CNN learns directional preferences
-  - ft09: Game-over resets to known state → target=0. CNN learns to avoid game-over
 - **Speed optimizations (6 changes):** 3.0-4.6ms → 0.3-1.4ms/act
-  - Hash comparison (not array_equal), no CCL, GPU-only indexing, fast hash
-- **Ablation study:** Speed > model sophistication
-  - 34M params learns 19x faster per-action, but 10x slower wall-time → fewer levels
+- **Ablation study:** Speed > sophistication (with sigmoid sampling); overturned by goose+temp
   - See [V4 Ablation Study](findings/V4-ABLATION-STUDY.md)
 
 ### v4.0 Agent — Baseline (CNN-guided, P(frame_change))
@@ -236,6 +248,7 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 
 ## Recent Completions
 
+- **[2026-02-12] v4.2 Goose + Temp + Epsilon**: Goose 34M + softmax temp=0.5 + epsilon-greedy. **6 levels** (vc33=3, ls20=1, ft09=2). vc33 L3 breakthrough.
 - **[2026-02-12] v4.1 Ablation Study**: Tested model size, training frequency, persistence. Speed > sophistication. See [V4 Ablation](findings/V4-ABLATION-STUDY.md).
 - **[2026-02-12] v4.1 Speed Optimizations**: 6 changes (hash comparison, no CCL, GPU indexing, fast hash). 3.0-4.6ms → 0.3-1.4ms/act. **5 levels** (vc33=2, ls20=1, ft09=2).
 - **[2026-02-10] v4.1 Novelty Signal**: Target changed from P(frame_change) to P(novel_state). **4 levels total** (vc33=2, ls20=1, ft09=1). Single most impactful change.
@@ -276,8 +289,9 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 4. ~~Novelty signal~~ Done. **4 levels** (vc33=2, ls20=1, ft09=1). Best ever.
 5. ~~Speed optimization~~ Done. 0.3-1.4ms/act (120K actions/game budget achieved)
 6. ~~Ablation study~~ Done. Speed > model sophistication. See [V4 Ablation](findings/V4-ABLATION-STUDY.md)
-7. **Exploration improvements** — vc33 level 3+ blocked, need better strategy
-8. **Competition submission** — ARC Prize 2026 (March 25, 2026)
+7. ~~Exploration improvements~~ Done. Goose + temp=0.5 + epsilon-greedy. **6 levels.**
+8. **Further optimization** — vc33 L4+, ft09 RHAE, ls20 L2
+9. **Competition submission** — ARC Prize 2026 (March 25, 2026)
 
 ---
 
