@@ -1,29 +1,32 @@
-# v4 Architecture: Online P(frame_change) CNN
+# v4 Architecture: Online P(state_novelty) CNN
 
 **Status:** Active development
-**Approach:** StochasticGoose-inspired online CNN predicting P(frame_change | state, action)
-**Goal:** >3 levels across 3 games, ~1ms/action
+**Approach:** StochasticGoose-inspired online CNN predicting P(novel_state | state, action)
+**Results:** 5 levels across 3 games (vc33=2, ls20=1, ft09=2)
+**Speed:** 0.3-1.4ms/act (120K actions/game in 3 min budget)
 
 ---
 
 ## Design Principles
 
-1. **One question:** P(frame_change | state, action) — nothing else
-2. **Online-only learning:** Model starts from scratch each game, no pretraining
+1. **One question:** P(novel_state | state, action) — nothing else
+2. **Online-only learning:** Model starts from scratch each level, no pretraining
 3. **CNN visual generalization:** Convolutional structure transfers knowledge spatially
-4. **State graph for structure:** Deduplication, dead-end pruning, frontier navigation
-5. **Reset per level:** Prevents catastrophic forgetting between game stages
+4. **No state graph for action selection:** CNN-guided stochastic sampling only
+5. **Reset per level:** Fresh model for each game stage
+6. **Random restart:** If stuck, reset CNN weights (keep novelty tracking)
+7. **Speed first:** 0.3-1.4ms/act allows 120K actions/game in competition time budget
 
 ---
 
 ## Architecture
 
 ```
-┌──────────────── v4 Agent ──────────────────────────────────────────────┐
+┌──────────────── v4 Agent (5.3M params) ───────────────────────────────┐
 │                                                                         │
 │  Game Engine → frame [64,64] (16 colors)                               │
 │                                                                         │
-│  ┌─ CNN Model (~2.5M params) ──────────────────────────────────────┐   │
+│  ┌─ CNN Model (5.3M params, 0.32ms forward) ─────────────────────┐   │
 │  │                                                                  │   │
 │  │  Input: one_hot(frame) → [16, 64, 64]                          │   │
 │  │                                                                  │   │
@@ -35,41 +38,50 @@
 │  │    → [256, 8, 8] feature map                                    │   │
 │  │                                                                  │   │
 │  │  Action Head (for actions 1-5):                                  │   │
-│  │    AdaptiveAvgPool → [256, 1, 1] → flatten                     │   │
-│  │    Linear(256→128) + ReLU + Dropout(0.2)                        │   │
-│  │    Linear(128→5) → sigmoid → P(frame_change) per action         │   │
+│  │    Flatten → [16384]  (preserves spatial info)                  │   │
+│  │    Linear(16384→256) + ReLU + Dropout(0.2)                      │   │
+│  │    Linear(256→5) → sigmoid → P(novel_state) per action          │   │
 │  │                                                                  │   │
 │  │  Coordinate Head (for action 6 = click):                        │   │
 │  │    ConvTranspose2d(256→128, k=4, s=2, p=1) + BN + ReLU         │   │
 │  │    ConvTranspose2d(128→64, k=4, s=2, p=1) + BN + ReLU          │   │
 │  │    ConvTranspose2d(64→32, k=4, s=2, p=1) + BN + ReLU           │   │
 │  │    Conv2d(32→1, k=1) → [1, 64, 64]                             │   │
-│  │    → sigmoid → P(frame_change) per pixel                        │   │
+│  │    → sigmoid → P(novel_state) per pixel                         │   │
 │  │                                                                  │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
-│  ┌─ Experience Buffer (max 50K unique) ────────────────────────────┐   │
-│  │  Stores: (frame_hash, action_idx, frame_changed)                │   │
-│  │  Hash dedup: same (state, action) not stored twice              │   │
-│  │  Cleared on level complete                                      │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
+│  ┌─ Experience Buffer (max 200K unique) ─────────────────────────┐    │
+│  │  Stores: (frame, frame_hash, action_idx, target)               │    │
+│  │  Hash dedup: same (frame_hash, action) not stored twice        │    │
+│  │  Target = 1.0 if (frame_changed AND state_novel) else 0.0     │    │
+│  │  Cleared on level complete and on random restart               │    │
+│  └────────────────────────────────────────────────────────────────┘    │
 │                                                                         │
-│  ┌─ State Graph (from v3) ─────────────────────────────────────────┐   │
-│  │  Nodes = frame hashes, Edges = (action, SUCCESS/DEAD/UNTESTED)  │   │
-│  │  BFS frontier navigation with committed full paths              │   │
-│  │  Dead-end backward propagation                                  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
+│  ┌─ Novelty Tracking ────────────────────────────────────────────┐    │
+│  │  seen_states: set of frame hashes (never cleared within game)  │    │
+│  │  Persists across restarts — prevents re-exploring known space  │    │
+│  │  Target=0 for: no frame change, OR frame changed to known state│    │
+│  │  Target=1 for: frame changed to never-before-seen state        │    │
+│  └────────────────────────────────────────────────────────────────┘    │
 │                                                                         │
-│  ┌─ Action Selection ──────────────────────────────────────────────┐   │
+│  ┌─ Random Restart ──────────────────────────────────────────────┐    │
+│  │  If no novel state in 5000 steps: reset CNN + clear buffer     │    │
+│  │  Keep seen_states (don't re-explore known territory)           │    │
+│  │  Max 3 restarts per level                                      │    │
+│  └────────────────────────────────────────────────────────────────┘    │
+│                                                                         │
+│  ┌─ Action Selection (CNN-guided stochastic sampling) ───────────┐    │
 │  │                                                                  │   │
-│  │  1. If frontier_plan has queued actions → pop next               │   │
-│  │  2. Get CNN predictions for current frame                       │   │
-│  │  3. Mask dead actions (from state graph)                        │   │
-│  │  4. Boost untested actions (from state graph)                   │   │
-│  │  5. Sample from distribution (sigmoid probs + exploration)      │   │
-│  │  6. If no local untested → commit to BFS frontier path          │   │
+│  │  If buffer < batch_size: uniform random                         │   │
+│  │  Otherwise:                                                      │   │
+│  │    1. CNN forward pass → action_probs[5], coord_probs[64,64]   │   │
+│  │    2. Simple actions: prob from action_probs, min 0.01          │   │
+│  │    3. Click actions: prob from coord_probs at region centroids  │   │
+│  │       + random click with p=0.02                                │   │
+│  │    4. Normalize and sample from distribution                    │   │
 │  │                                                                  │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
+│  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 │  → action (type, x, y) → Game Engine                                   │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -77,78 +89,64 @@
 
 ---
 
-## Key Differences from StochasticGoose
+## Speed Optimizations (2026-02-12)
 
-| Aspect | StochasticGoose | v4 |
-|--------|-----------------|-----|
-| State dedup | Hash set in buffer only | State graph + hash buffer |
-| Dead-end pruning | None (learns from data) | Backward propagation in graph |
-| Frontier navigation | None (stochastic sampling) | BFS committed paths |
-| Click space | Raw 64x64 sampling | Region centroids (CCL) + raw fallback |
-| Batch norm | No | Yes (faster convergence) |
-| Backbone pooling | MaxPool(4,4) in action head | MaxPool(2) in backbone + AdaptiveAvgPool |
+Six critical changes reduced action time from 3.0-4.6ms to 0.3-1.4ms:
 
-Our additions (state graph, frontier navigation, region clicks) should help
-on games that StochasticGoose struggles with — particularly click puzzles
-where 4096 positions is too large to sample randomly.
+1. **Hash comparison:** Replaced `np.array_equal(frame, prev_frame)` with `hash(frame) == prev_hash`
+   - Frame change detection now O(1) instead of O(4096)
+
+2. **No frame.copy():** Removed unnecessary frame copies in hot path
+   - Memory allocation is expensive, buffer references are cheap
+
+3. **Fast hash:** Replaced `blake2b(frame.tobytes()).hexdigest()` with `hash(frame.tobytes())`
+   - All hash types changed: str → int
+   - Python's SipHash is optimized and doesn't require hex encoding
+
+4. **No CCL segmentation:** Eliminated scipy CCL entirely
+   - CNN heatmap top-K pixels replace region centroids for click actions
+   - Removed scipy dependency
+
+5. **Pre-allocated one-hot tensors:** Use `scatter_` on pre-allocated buffers instead of `F.one_hot`
+   - Avoids repeated tensor allocation in training loop
+
+6. **GPU-only training indexing:** Keep sampled indices on GPU during batch creation
+   - No CPU round-trips during training
+
+**Result:** ls20=0.3ms, vc33=1.4ms, ft09=1.3ms (single-game speeds)
+
+**Bug fix:** Click action type 6 was incorrectly pruned after 20 random misses. Fixed — click is never pruned.
 
 ---
 
-## Training
+## Novelty Signal (Key Innovation)
 
-**Loss:** Binary cross-entropy per action
-```
-L = BCE(predicted_change_prob, actual_changed) + entropy_reg
-entropy_reg = -α * H(action_probs) - β * H(coord_probs)
-```
+**Problem:** P(frame_change) is uninformative for many games:
+- ls20: 99% of actions change the frame (player always moves) — CNN can't differentiate
+- ft09: Game-over resets to start → frame "changed" but counterproductive
 
-**Hyperparameters:**
+**Solution:** Target = `frame_changed AND state_novel`:
+- ls20: Only ~15% of actions lead to never-seen states → CNN learns directional preferences
+- ft09: Game-over resets to well-known start state → target=0 → CNN avoids game-over moves
+- vc33: Similar to frame_change (each new click state is novel anyway)
+
+**Non-stationarity:** As exploration progresses, novel rate decays toward 0 (all states seen).
+This is expected and acceptable — by the time signal decays, CNN has learned enough to guide exploration.
+
+---
+
+## Hyperparameters
+
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| Learning rate | 1e-4 | Adam, matches StochasticGoose |
-| Batch size | 64 | Fits in single forward pass |
-| Train frequency | Every 5 actions | Balance speed vs learning |
-| Buffer size | 50K | Deduped, smaller than SG's 200K |
-| Entropy coeff (action) | 1e-4 | Encourage exploration |
-| Entropy coeff (coord) | 1e-5 | Lighter for coordinates |
+| Learning rate | 1e-4 | Adam |
+| Batch size | 32 | Fast training steps, reduced from 64 |
+| Train frequency | Every 20 actions | Ablation tested: 5/10/20, sweet spot at 20 |
+| Buffer size | 50K | Deduped by (frame_hash, action) |
+| Entropy coeff | 1e-4 | Prevents probability collapse |
 | Dropout | 0.2 | Action head only |
-
-**Training trigger:** Every 5 actions, sample batch of 64 from buffer, one
-gradient step. ~0.5ms per training step on 4090.
-
----
-
-## Action Selection
-
-```python
-def select_action(frame, available_actions, state_graph, model):
-    # 1. Check frontier plan (committed BFS path)
-    if frontier_plan:
-        return frontier_plan.popleft()
-
-    # 2. Get CNN predictions
-    probs = model(frame)  # action_probs[5], coord_probs[64,64]
-
-    # 3. Build candidate scores
-    for each available action:
-        if state_graph says DEAD → score = 0
-        elif state_graph says UNTESTED → score = prob + exploration_bonus
-        else → score = prob
-
-    # 4. For click actions: use region centroids
-    if action_6 available:
-        for each region:
-            click_prob = coord_probs[region.centroid_y, region.centroid_x]
-            if untested in graph → click_prob += exploration_bonus
-
-    # 5. Sample from distribution
-    action = sample(scores)
-
-    # 6. If all local actions tested → commit to frontier path
-    if no untested actions locally:
-        path = state_graph.get_full_path_to_frontier()
-        if path: frontier_plan = deque(path)
-```
+| Restart threshold | 5000 steps | Reset if no novel state found |
+| Max restarts/level | 3 | Prevent infinite restarts |
 
 ---
 
@@ -157,23 +155,14 @@ def select_action(frame, available_actions, state_graph, model):
 ```
 Step N:
   1. Receive frame from game
-  2. Hash frame, register in state graph
-  3. Record previous (state, action, frame_changed) in buffer
-  4. Update state graph edge (prev → current)
-  5. If step % 5 == 0: train model (sample 64 from buffer)
-  6. Select action (CNN prediction + graph info)
-  7. Execute action
+  2. Hash frame (blake2b)
+  3. Record previous (state, action, novelty_target) in buffer
+  4. Track novelty (add frame_hash to seen_states)
+  5. If step % 10 == 0: train model (sample 64 from buffer)
+  6. Check for restart (5000 steps without novel state)
+  7. Select action (CNN prediction, stochastic sample)
+  8. Execute action
 ```
-
-**Target timing:**
-| Operation | Time |
-|-----------|------|
-| Frame hash | 0.02ms |
-| State graph update | 0.01ms |
-| CNN forward | 0.3ms |
-| Training (amortized) | 0.1ms |
-| Action selection | 0.05ms |
-| **Total** | **~0.5ms** |
 
 ---
 
@@ -182,10 +171,25 @@ Step N:
 On level complete:
 1. Reset CNN model weights (fresh random init)
 2. Clear experience buffer
-3. Clear state graph
-4. Reset frontier plan
+3. Clear seen_states (new level = new state space)
+4. Reset restart counter
 
 Each level is a fresh learning problem. No transfer between levels.
+
+---
+
+## Key Differences from StochasticGoose
+
+| Aspect | StochasticGoose (34M) | v4 (5.3M) |
+|--------|----------------------|------------|
+| Model size | 34M params | 5.3M params |
+| Spatial features | Flatten(65536) | Flatten(16384) |
+| Training target | P(frame_change) | P(novel_state) |
+| State dedup | Hash set | Hash-deduped buffer |
+| Click handling | Raw 64x64 | Region centroids (CCL) |
+| Stuck recovery | None documented | Random restart (5K threshold) |
+| Batch norm | No | Yes |
+| Backbone | 5 conv layers | 4 conv layers |
 
 ---
 
@@ -193,22 +197,26 @@ Each level is a fresh learning problem. No transfer between levels.
 
 ```
 src/v4/
+├── __init__.py
+├── __main__.py       # Entry point
 ├── agent.py          # Main agent (game loop, action selection, training)
 ├── model.py          # CNN model (backbone + action head + coord head)
-└── (uses from v3)
-    ├── state_graph.py    # Imported from aria_v3
-    └── frame_processor.py # Imported from aria_v3
+└── (imports from v3)
+    └── frame_processor.py # CCL segmentation for click targets
 ```
 
 ---
 
-## Success Criteria
+## Results
 
-| Metric | Target | v3.2 Best |
-|--------|--------|-----------|
-| vc33 levels | >=1 | 1 |
-| ls20 levels | >=2 | 0-1 |
-| ft09 levels | >=1 | 0 |
-| Total levels | >3 | 1-2 |
-| Speed | <1ms/action | 1.0-1.2ms |
-| Actions per game | ~40K | ~20K |
+| Version | vc33 | ls20 | ft09 | Speed | Total |
+|---------|------|------|------|-------|-------|
+| v4.0 (P(frame_change)) | 2 levels | 0 | 0 | 2.6-3.5ms | 2 |
+| v4.1 (novelty signal) | 2 levels | 1 level | 1 level | 3.0-4.6ms | 4 |
+| v4.1 + speed opt | 2 levels | 1 level | 2 levels | 0.3-1.4ms | **5** |
+| v4.1 ablation (goose 34M) | 2 levels | N/A | N/A | 2.9ms | 2 |
+| v4.1 ablation (combined) | 2 levels | N/A | N/A | 14.1ms | 2 |
+
+**Ablation study:** Speed > model sophistication. 34M params learns 19x faster per-action but is 10x slower wall-time. See [V4 Ablation Study](../findings/V4-ABLATION-STUDY.md).
+
+**Baseline config:** 1.9M params, train every 20 steps, no persist, 0.3-1.4ms/act

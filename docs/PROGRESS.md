@@ -1,33 +1,39 @@
 # Project Progress
 
 ## Current State
-**Phase:** v4 — Online P(state_novelty) CNN (StochasticGoose-inspired)
+**Phase:** v4.1 — Online P(state_novelty) CNN (StochasticGoose-inspired)
 **Branch:** main
-**Status:** Novelty signal implemented. **4 levels across 3 games** (vc33=2, ls20=1, ft09=1). Best ever.
+**Status:** Speed optimized. **5 levels across 3 games** (vc33=2, ls20=1, ft09=2). Best ever.
 
 ## Immediate Next Step
-**Speed optimization + more levels:**
-1. Speed: currently 3.3-4.6ms/action, target <1.5ms (allows ~120K actions/game)
-2. More vc33 levels (stuck on level 3 after 8K+ actions)
-3. More ls20/ft09 levels (both complete level 1 but late, need faster convergence)
-4. Action efficiency — levels take 20K-38K actions vs 15-29 action baselines
+**Exploration strategy improvements:**
+1. vc33 level 3+ blocked — CNN exploration hits ceiling after 10K+ actions
+2. Ablation study complete: speed > model sophistication (see [V4 Ablation](findings/V4-ABLATION-STUDY.md))
+3. Current speed: 0.3-1.4ms/act (120K actions/game budget achieved)
+4. Next: Better exploration strategy or richer signal than P(state_novelty)
 
 ---
 
-## v4 Results (Online P(frame_change) CNN)
+## v4 Results (Online P(state_novelty) CNN)
 
-### v4.1 Agent — Novelty Signal (CNN-guided, P(novel_state))
+### v4.1 Agent — Optimized (CNN-guided, P(novel_state))
 | Game | Actions | Levels | Speed | Notes |
 |------|---------|--------|-------|-------|
-| **vc33** | 10K | **2** | 4.6ms/act | Level 1 @ 73, Level 2 @ 1908. Consistent. |
-| **ls20** | 40K | **1** | 3.0ms/act | Level 1 @ 37844. Novel rate 15% vs 99% frame change. **NEW!** |
-| **ft09** | 40K | **1** | 3.6ms/act | Level 1 @ 19770. 1188 resets but CNN avoids game-over states. **NEW!** |
+| **vc33** | 11K | **2** | 1.4ms/act | Level 1 @ 84, Level 2 @ 10,693. Stuck on L3. |
+| **ls20** | 38K | **1** | 0.3ms/act | Level 1 @ 37,844. Novel rate 15% vs 99% frame change. |
+| **ft09** | 9K | **2** | 1.3ms/act | Level 1 @ 5,326, Level 2 @ 8,770. CNN avoids game-over. |
 
-**Key insight: Novelty signal >> frame_change signal**
-- Target = `frame_changed AND state_novel` (resulting state never seen before)
-- ls20: Reduces 99% uninformative → 15% meaningful signal. CNN learns "which direction = new territory"
-- ft09: Game-over resets to known start state → target=0 naturally. CNN learns to avoid game-over actions.
-- vc33: Similar to frame_change (each new click state is novel anyway)
+**Total: 5 levels (best ever)**
+
+**Key insights:**
+- **Novelty signal >> frame_change:** Target = `frame_changed AND state_novel`
+  - ls20: 99% uninformative → 15% meaningful. CNN learns directional preferences
+  - ft09: Game-over resets to known state → target=0. CNN learns to avoid game-over
+- **Speed optimizations (6 changes):** 3.0-4.6ms → 0.3-1.4ms/act
+  - Hash comparison (not array_equal), no CCL, GPU-only indexing, fast hash
+- **Ablation study:** Speed > model sophistication
+  - 34M params learns 19x faster per-action, but 10x slower wall-time → fewer levels
+  - See [V4 Ablation Study](findings/V4-ABLATION-STUDY.md)
 
 ### v4.0 Agent — Baseline (CNN-guided, P(frame_change))
 | Game | Actions | Levels | Speed | Notes |
@@ -230,6 +236,8 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 
 ## Recent Completions
 
+- **[2026-02-12] v4.1 Ablation Study**: Tested model size, training frequency, persistence. Speed > sophistication. See [V4 Ablation](findings/V4-ABLATION-STUDY.md).
+- **[2026-02-12] v4.1 Speed Optimizations**: 6 changes (hash comparison, no CCL, GPU indexing, fast hash). 3.0-4.6ms → 0.3-1.4ms/act. **5 levels** (vc33=2, ls20=1, ft09=2).
 - **[2026-02-10] v4.1 Novelty Signal**: Target changed from P(frame_change) to P(novel_state). **4 levels total** (vc33=2, ls20=1, ft09=1). Single most impactful change.
 - **[2026-02-10] v4.0 Agent First Results**: vc33=2 levels (best ever), ls20=0, ft09=0. 2.6-3.5ms/action. CNN-guided action selection.
 - **[2026-02-10] v4.0 Agent Implemented**: Online P(frame_change) CNN, StochasticGoose-inspired. No pretraining, no state graph for action selection.
@@ -266,9 +274,10 @@ Self-supervised target: predict next frame. Adapts to each game during play.
 2. ~~Implement v4 agent~~ Done. `src/v4/agent.py`, `src/v4/model.py`
 3. ~~First test on 3 games~~ Done. vc33=2 levels, ls20=0, ft09=0
 4. ~~Novelty signal~~ Done. **4 levels** (vc33=2, ls20=1, ft09=1). Best ever.
-5. **Speed optimization** — 3.3-4.6ms/act → target <1.5ms
-6. **More levels** — vc33 level 3, ls20/ft09 level 2
-7. **Competition submission** — ARC Prize 2026 (March 25, 2026)
+5. ~~Speed optimization~~ Done. 0.3-1.4ms/act (120K actions/game budget achieved)
+6. ~~Ablation study~~ Done. Speed > model sophistication. See [V4 Ablation](findings/V4-ABLATION-STUDY.md)
+7. **Exploration improvements** — vc33 level 3+ blocked, need better strategy
+8. **Competition submission** — ARC Prize 2026 (March 25, 2026)
 
 ---
 
