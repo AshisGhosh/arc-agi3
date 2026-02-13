@@ -47,7 +47,7 @@ class ExperienceBuffer:
     """Hash-deduped experience buffer with contiguous memory layout.
 
     Each unique (frame_hash, action) pair is stored exactly once.
-    Larger capacity (100K) ensures frontier data isn't lost when exploring.
+    Larger capacity ensures frontier data isn't lost when exploring.
     """
 
     def __init__(self, max_size: int = 50_000):
@@ -215,12 +215,12 @@ class V4Agent:
     """CNN P(novelty) agent with graph-assisted exploration."""
 
     def __init__(self, device: str = "cuda", model_size: str = "goose",
-                 persist_model: bool = False, train_every: int = 20,
+                 persist_model: bool = True, train_every: int = 20,
                  temperature: float = 0.5):
         self.device = device
         self.model_size = model_size
         self.persist_model = persist_model
-        self.buffer = ExperienceBuffer(max_size=50_000)
+        self.buffer = ExperienceBuffer(max_size=100_000)
         self.graph = StateGraph()
 
         self.model: FrameChangeCNN | None = None
@@ -247,6 +247,10 @@ class V4Agent:
         self._action_changes: dict[int, int] = {}   # action_type → frame change count
         self._pruned_actions: set[int] = set()       # action types that are useless
         self._prune_threshold = 20  # prune after this many zero-change attempts
+
+        # Click deduplication: track tried (state_hash, cy, cx) combinations
+        # Same state + same click = same result (deterministic games)
+        self._tried_clicks: set[int] = set()  # hash of (frame_hash, cy, cx)
 
         # Stats
         self.step_count = 0
@@ -350,6 +354,13 @@ class V4Agent:
             self.buffer.add(self.prev_frame, self.prev_hash,
                             buf_atype, self.prev_click_y, self.prev_click_x,
                             target)
+
+            # Record failed clicks for deduplication (deterministic games)
+            # Only dedup clicks that didn't change frame — truly useless
+            if (self.prev_simple_idx < 0 and self.prev_click_y >= 0
+                    and not frame_changed):
+                self._tried_clicks.add(
+                    hash((self.prev_hash, self.prev_click_y, self.prev_click_x)))
 
         # Register state in graph
         self.seen_states[frame_hash] = self.seen_states.get(frame_hash, 0) + 1
@@ -458,20 +469,31 @@ class V4Agent:
             candidates.append((game_action, None, None, i))
             logits.append(float(action_logits_np[i]) if i < 5 else 0.0)
 
-        # Click actions: top-K pixels from CNN heatmap
+        # Click actions: top-K pixels from CNN heatmap (skip already-tried)
         if (self.has_click and 6 not in self._pruned_actions
                 and coord_logits_np is not None):
             flat = coord_logits_np.ravel()
-            k = min(16, flat.shape[0])
+            k = min(32, flat.shape[0])
             top_idx = np.argpartition(flat, -k)[-k:]
+            # Sort by logit descending, take up to 16 untried
+            top_idx = top_idx[np.argsort(flat[top_idx])[::-1]]
+            added = 0
             for idx in top_idx:
                 cy, cx = divmod(int(idx), 64)
+                if hash((frame_hash, cy, cx)) in self._tried_clicks:
+                    continue
                 candidates.append((6, int(cx), int(cy), -1))
                 logits.append(float(flat[idx]))
-            # Random click for exploration (low logit)
-            ry, rx = np.random.randint(0, 64, size=2)
-            candidates.append((6, int(rx), int(ry), -1))
-            logits.append(float(flat.min()) - 2.0)
+                added += 1
+                if added >= 16:
+                    break
+            # Random untried click for exploration (low logit)
+            for _ in range(10):
+                ry, rx = np.random.randint(0, 64, size=2)
+                if hash((frame_hash, ry, rx)) not in self._tried_clicks:
+                    candidates.append((6, int(rx), int(ry), -1))
+                    logits.append(float(flat.min()) - 2.0)
+                    break
 
         if not candidates:
             self.random_actions += 1
@@ -766,8 +788,11 @@ def main():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--model-size", "-s", default="goose",
                         choices=["small", "medium", "large", "goose"])
-    parser.add_argument("--persist-model", action="store_true",
-                        help="Keep CNN across levels (don't reinitialize)")
+    parser.add_argument("--persist-model", action="store_true", default=True,
+                        help="Keep CNN across levels (default: True)")
+    parser.add_argument("--no-persist-model", dest="persist_model",
+                        action="store_false",
+                        help="Reset CNN on each level")
     parser.add_argument("--train-every", type=int, default=20,
                         help="Train CNN every N steps (default: 20)")
     parser.add_argument("--temperature", "-t", type=float, default=0.5,
